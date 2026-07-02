@@ -234,9 +234,9 @@ class Televisarr:
 
         # Get season watch status from Plex
         season_watch_status = self.plex.get_show_season_watch_status(
-            plex_library=show._library,
+            plex_library=show.library,  # ✅ Use show.library
             show_title=series_title,
-            season_number=season_number,
+            season_number=season_number,  # ✅ Use season_number from function params
             year=series.get("year"),
             tvdb_id=series.get("tvdbId")
         )
@@ -515,9 +515,9 @@ class Televisarr:
         # Check if all seasons are fully watched
         for season_num in season_numbers:
             season_watch_status = self.plex.get_show_season_watch_status(
-                plex_library=show._library,
+                plex_library=show.library,  # ✅ Use show.library
                 show_title=series_title,
-                season_number=season_num,
+                season_number=season_num,  # ✅ Use season_num from loop
                 year=series.get("year"),
                 tvdb_id=series.get("tvdbId")
             )
@@ -629,7 +629,7 @@ class Televisarr:
 
             # Get or create collection
             collection = self.plex.get_or_create_collection(
-                show._library,
+                show.library,  # ✅ Use show.library
                 collection_name,
                 description=description
             )
@@ -659,7 +659,7 @@ class Televisarr:
         collection_name = library_config.leaving_soon.collection_name
 
         try:
-            collection = show._library.collection(collection_name)
+            collection = show.library.collection(collection_name)  # ✅ Use show.library
             episodes = show.episodes()
             season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
 
@@ -690,11 +690,11 @@ class Televisarr:
             logger.info(f"Libraries failed: {self.libraries_failed}")
 
         logger.info("-" * 40)
-        logger.info("Seasons tagged for deletion:  {self.seasons_tagged}")
-        logger.info("Seasons deleted:              {self.seasons_deleted}")
-        logger.info("Seasons saved:                {self.seasons_saved}")
-        logger.info("Series tagged for deletion:   {self.series_tagged}")
-        logger.info("Series deleted:               {self.series_deleted}")
-        logger.info("Series saved:                 {self.series_saved}")
+        logger.info(f"Seasons tagged for deletion:  {self.seasons_tagged}")
+        logger.info(f"Seasons deleted:              {self.seasons_deleted}")
+        logger.info(f"Seasons saved:                {self.seasons_saved}")
+        logger.info(f"Series tagged for deletion:   {self.series_tagged}")
+        logger.info(f"Series deleted:               {self.series_deleted}")
+        logger.info(f"Series saved:                 {self.series_saved}")
 
         logger.info(separator)
