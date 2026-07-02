@@ -171,7 +171,7 @@ class PlexMediaServer:
                 "view_count": item.viewCount or 1,
                 "title": item.title,
                 "show_title": item.grandparentTitle,
-                "year": item.grandparentYear,
+                "year": getattr(item, 'grandparentYear', None) or getattr(item, 'year', None),
                 "season_number": item.seasonNumber,
                 "episode_number": item.episodeNumber,
                 "rating_key": rating_key,
