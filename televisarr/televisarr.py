@@ -238,7 +238,7 @@ class Televisarr:
 
         # Get season watch status from Plex - using plex_library directly
         season_watch_status = self.plex.get_show_season_watch_status(
-            plex_library=plex_library,
+            library=plex_library,
             show_title=series_title,
             season_number=season_number,
             year=series.get("year"),
@@ -525,7 +525,7 @@ class Televisarr:
         # Check if all seasons are fully watched
         for season_num in season_numbers:
             season_watch_status = self.plex.get_show_season_watch_status(
-                plex_library=plex_library,
+                library=plex_library,
                 show_title=series_title,
                 season_number=season_num,
                 year=series.get("year"),
