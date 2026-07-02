@@ -245,11 +245,11 @@ class Televisarr:
         season_added_date = None
         for season in series.get("seasons", []):
             if season.get("seasonNumber") == season_number:
-                # Sonarr uses 'added' field or we can use the series added date
-                # For now, we'll use the series added date as a fallback
                 if season.get("added"):
                     try:
-                        season_added_date = datetime.fromisoformat(season["added"].replace("Z", "+00:00"))
+                        # Parse the date and make it timezone-naive for comparison
+                        dt = datetime.fromisoformat(season["added"].replace("Z", "+00:00"))
+                        season_added_date = dt.replace(tzinfo=None)
                     except (ValueError, TypeError):
                         pass
                 break
@@ -257,7 +257,8 @@ class Televisarr:
         # If we couldn't get the season added date, use the series added date
         if not season_added_date and series.get("added"):
             try:
-                season_added_date = datetime.fromisoformat(series["added"].replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(series["added"].replace("Z", "+00:00"))
+                season_added_date = dt.replace(tzinfo=None)
             except (ValueError, TypeError):
                 pass
 
