@@ -223,20 +223,11 @@ class Televisarr:
     ) -> None:
         """
         Process a single season.
-
-        Args:
-            library_config: Library configuration
-            series: Series data from Sonarr
-            season_number: Season number to process
-            watch_history: Plex watch history
-            show: Plex show item
-            plex_library: Plex library section
-            series_eligible_for_deletion: Whether the series is eligible for deletion
         """
         series_id = series["id"]
         series_title = series.get("title", "Unknown")
 
-        # Get season watch status from Plex - using plex_library directly
+        # Get season watch status from Plex
         season_watch_status = self.plex.get_show_season_watch_status(
             library=plex_library,
             show_title=series_title,
@@ -250,12 +241,33 @@ class Televisarr:
             logger.debug(f"Season {season_number} has no episodes, skipping")
             return
 
+        # Get the season's added date from Sonarr data
+        season_added_date = None
+        for season in series.get("seasons", []):
+            if season.get("seasonNumber") == season_number:
+                # Sonarr uses 'added' field or we can use the series added date
+                # For now, we'll use the series added date as a fallback
+                if season.get("added"):
+                    try:
+                        season_added_date = datetime.fromisoformat(season["added"].replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        pass
+                break
+
+        # If we couldn't get the season added date, use the series added date
+        if not season_added_date and series.get("added"):
+            try:
+                season_added_date = datetime.fromisoformat(series["added"].replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
         # Check if season is eligible for deletion
         is_eligible = self._check_season_deletion_eligibility(
             library_config,
             season_watch_status,
             season_number,
-            series_id
+            series_id,
+            season_added_date  # ✅ Pass the added date
         )
 
         if is_eligible:
@@ -271,7 +283,8 @@ class Televisarr:
         library_config: LibraryConfig,
         season_watch_status: Dict[str, Any],
         season_number: int,
-        series_id: int
+        series_id: int,
+        season_added_date: Optional[datetime] = None  # ✅ Added parameter
     ) -> bool:
         """
         Check if a season is eligible for deletion.
@@ -332,8 +345,18 @@ class Televisarr:
         if no_activity_config.get("enabled", False):
             days = no_activity_config.get("days", 180)
             if no_activity:
-                logger.debug(f"Season {season_number} has no watch activity, eligible for deletion")
-                return True
+                if season_added_date:
+                    days_since_added = (datetime.now() - season_added_date).days
+                    if days_since_added >= days:
+                        logger.debug(f"Season {season_number} has no watch activity for {days_since_added} days (threshold: {days}), eligible")
+                        return True
+                    else:
+                        logger.debug(f"Season {season_number} has no watch activity but only {days_since_added} days since added (threshold: {days})")
+                        return False
+                else:
+                    # No added date available - conservative approach
+                    logger.debug(f"Season {season_number} has no watch activity but no added date available, delaying")
+                    return False
 
         # Rule 3: Partially watched (optional)
         partially_watched_config = library_config.season.partially_watched
