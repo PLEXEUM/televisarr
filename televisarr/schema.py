@@ -73,9 +73,9 @@ class SeasonConfig(BaseModel):
     """Season-level deletion rules."""
 
     fully_watched: dict = Field(
-        default_factory=lambda: {"enabled": True, "watch_users": "any"},
-        description="Delete seasons where all episodes are fully watched. watch_users: 'any', 'all', or list of usernames",
-        json_schema_extra={"example": {"enabled": True, "watch_users": "any"}},
+        default_factory=lambda: {"enabled": True, "watch_users": "any", "days": 0},
+        description="Delete seasons where all episodes are fully watched. watch_users: 'any', 'all', or list of usernames. days: 0=immediate, or number of days to wait after fully watched",
+        json_schema_extra={"example": {"enabled": True, "watch_users": "any", "days": 30}},
     )
     no_activity: dict = Field(
         default_factory=lambda: {"enabled": False, "days": 180},

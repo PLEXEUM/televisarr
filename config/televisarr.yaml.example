@@ -85,12 +85,15 @@ libraries:
     
     season:
       # Rule 1: Delete fully watched seasons
-      fully_watched:
+        fully_watched:
         enabled: true
         # watch_users: "any" - any user can watch an episode to count it
         # watch_users: "all" - all users must watch every episode
         # watch_users: ["user1", "user2"] - only specific users count
         watch_users: "any"
+        # days: 0 - delete immediately when fully watched
+        # days: 30 - wait 30 days after fully watched before deletion
+        days: 0
       
       # Rule 2: Delete seasons with no watch activity
       # If NO episodes in a season have been watched for X days, it's eligible

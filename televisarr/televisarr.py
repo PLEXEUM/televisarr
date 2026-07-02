@@ -273,7 +273,7 @@ class Televisarr:
         Check if a season is eligible for deletion.
 
         Rules:
-        1. All episodes are fully watched (fully_watched rule)
+        1. All episodes are fully watched (fully_watched rule) - with optional delay
         2. OR No episodes have been watched in X days (no_activity rule)
         3. OR Partially watched after X days (partially_watched rule, optional)
 
@@ -297,14 +297,31 @@ class Televisarr:
         last_watched = season_watch_status["last_watched"]
         no_activity = season_watch_status["no_activity"]
 
-        # Rule 1: Fully watched
-        if library_config.season.fully_watched.get("enabled", True):
+        # Rule 1: Fully watched (with optional delay)
+        fully_watched_config = library_config.season.fully_watched
+        if fully_watched_config.get("enabled", True):
             if all_watched:
                 # Check watch_users rule
-                watch_users = library_config.season.fully_watched.get("watch_users", "any")
+                watch_users = fully_watched_config.get("watch_users", "any")
                 if self._check_watch_users(watch_users, watched_episodes, total_episodes):
-                    logger.debug(f"Season {season_number} is fully watched, eligible for deletion")
-                    return True
+                    # Check if delay has passed
+                    delay_days = fully_watched_config.get("days", 0)
+                    if delay_days == 0:
+                        logger.debug(f"Season {season_number} is fully watched, eligible for deletion")
+                        return True
+                    elif last_watched:
+                        days_since = (datetime.now() - last_watched).days
+                        if days_since >= delay_days:
+                            logger.debug(f"Season {season_number} fully watched {days_since} days ago (delay: {delay_days}), eligible")
+                            return True
+                        else:
+                            days_remaining = delay_days - days_since
+                            logger.debug(f"Season {season_number} fully watched, waiting {days_remaining} more days")
+                            return False
+                    else:
+                        # Shouldn't happen (all_watched implies last_watched exists)
+                        logger.debug(f"Season {season_number} is fully watched but no last_watched date, delaying")
+                        return False
 
         # Rule 2: No activity
         no_activity_config = library_config.season.no_activity
