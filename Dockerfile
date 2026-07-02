@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /config && \
+RUN mkdir -p /config /config/logs && \
     useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app /config
 
