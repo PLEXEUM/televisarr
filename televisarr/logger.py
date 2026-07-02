@@ -58,6 +58,10 @@ def configure_logger(verbose):
 
 
 def setup_file_logger(log_dir):
+    # Create log directory if it doesn't exist
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    
     file_formatter = logging.Formatter(
         "%(asctime)s - %(levelname)-7s :: %(filename)s :: %(name)s : %(message)s",
         "%Y-%m-%d %H:%M:%S",
