@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
+
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Configuration (contains sensitive data)
+config/*.yaml
+!config/*.example.yaml
+
+# State files
+.deleterr_state.json
+.televisarr_state.json
+.deleterr.lock
+.televisarr.lock
+
+# Distribution
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Docker
+*.pid
+
+# Temp files
+*.tmp
+*.temp
+
+# Commit hash file (generated during build)
+commit_tag.txt

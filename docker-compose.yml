@@ -1,0 +1,10 @@
+services:
+  televisarr:
+    build: .
+    container_name: televisarr
+    environment:
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./config:/config
+      - ./logs:/config/logs
+    restart: unless-stopped

@@ -1,0 +1,187 @@
+# =============================================================================
+# Televisarr Configuration Example
+# =============================================================================
+# 
+# Copy this file to `config/televisarr.yaml` and edit it to your needs.
+# 
+# Televisarr monitors your Plex watch history and Sonarr library, automatically
+# moving fully-watched seasons (and entire series) to a "TV Leaving Soon"
+# collection, then deleting them after a configurable grace period.
+# =============================================================================
+
+# =============================================================================
+# GENERAL SETTINGS
+# =============================================================================
+
+# Dry run mode: If true, actions are only logged, not performed
+# Recommended: true for initial testing
+dry_run: true
+
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level: INFO
+
+# =============================================================================
+# PLEX CONNECTION
+# =============================================================================
+
+plex:
+  # URL of your Plex server (include port if not default 32400)
+  url: "http://localhost:32400"
+  
+  # Plex authentication token
+  # How to get: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/
+  token: "YOUR_PLEX_TOKEN"
+
+# =============================================================================
+# SONARR CONNECTION
+# =============================================================================
+
+sonarr:
+  # Name identifier for this Sonarr instance
+  name: "Sonarr"
+  
+  # URL of your Sonarr server (include port if not default 8989)
+  url: "http://localhost:8989"
+  
+  # Sonarr API key
+  # How to get: Settings > General > Security > API Key
+  api_key: "YOUR_SONARR_API_KEY"
+
+# =============================================================================
+# BUILT-IN SCHEDULER (Optional)
+# =============================================================================
+#
+# If enabled, Televisarr runs as a long-lived process with automatic scheduling.
+# If disabled, Televisarr runs once and exits (use with external schedulers).
+#
+# Schedule presets:
+#   - "hourly"   - Every hour at minute 0
+#   - "daily"    - Daily at 3 AM
+#   - "weekly"   - Sunday at 3 AM (default)
+#   - "monthly"  - First day of month at 3 AM
+#
+# Or use cron expressions: "0 3 * * 0" (minute hour day month day_of_week)
+
+# scheduler:
+#   enabled: true
+#   schedule: "weekly"
+#   timezone: "America/New_York"
+#   run_on_startup: false
+
+# =============================================================================
+# LIBRARY CONFIGURATION
+# =============================================================================
+
+libraries:
+  # Each library must match a Plex library name exactly
+  - name: "TV Shows"
+    
+    # Sonarr instance to use (must match the name above)
+    sonarr: "Sonarr"
+    
+    # =========================================================================
+    # SEASON DELETION RULES
+    # =========================================================================
+    
+    season:
+      # Rule 1: Delete fully watched seasons
+      fully_watched:
+        enabled: true
+        # watch_users: "any" - any user can watch an episode to count it
+        # watch_users: "all" - all users must watch every episode
+        # watch_users: ["user1", "user2"] - only specific users count
+        watch_users: "any"
+      
+      # Rule 2: Delete seasons with no watch activity
+      # If NO episodes in a season have been watched for X days, it's eligible
+      no_activity:
+        enabled: false
+        days: 180      # Delete after 180 days with 0 watches
+      
+      # Rule 3: Delete partially watched seasons (optional)
+      # If a season is partially watched and has no new activity for X days
+      partially_watched:
+        enabled: false
+        days: 365      # Delete after 365 days if partially watched
+    
+    # =========================================================================
+    # GRACE PERIOD
+    # =========================================================================
+    #
+    # How many days an item stays in "TV Leaving Soon" before deletion.
+    # Two-phase process:
+    #   1. Item is tagged and added to "TV Leaving Soon" collection
+    #   2. After grace_period days, item is deleted
+    #
+    grace_period: 7
+    
+    # =========================================================================
+    # SERIES DELETION RULES
+    # =========================================================================
+    #
+    # Series is eligible for deletion when:
+    #   - ALL seasons are fully watched
+    #   - AND series status is 'ended' or 'cancelled' (if require_ended is true)
+    #
+    series:
+      enabled: true
+      require_ended: true       # Only delete ended/cancelled series
+      watch_users: "any"        # Same options as season fully_watched
+      grace_period: 14          # Longer grace period for entire series
+    
+    # =========================================================================
+    # PROTECTION SETTINGS
+    # =========================================================================
+    #
+    # If someone re-watches an episode in a season that's in "TV Leaving Soon":
+    #   - The entire season is removed from the collection
+    #   - The season is protected for save_days days
+    #   - After save_days with no new watches, it can be re-added
+    #
+    protection:
+      enabled: true
+      save_days: 14             # Days to protect after a re-watch
+    
+    # =========================================================================
+    # TV LEAVING SOON COLLECTION
+    # =========================================================================
+    #
+    # Single Plex collection that shows all seasons and series scheduled for deletion.
+    # Items appear here when tagged, and are removed when saved or deleted.
+    #
+    leaving_soon:
+      collection_name: "TV Leaving Soon"
+      description: "These seasons/series will be deleted soon - watch to save them!"
+
+  # =========================================================================
+  # SECOND LIBRARY EXAMPLE (Optional)
+  # =========================================================================
+  #
+  # You can configure multiple libraries with different rules.
+  # For example, anime with longer retention periods:
+  #
+  # - name: "Anime"
+  #   sonarr: "Sonarr"
+  #   season:
+  #     fully_watched:
+  #       enabled: true
+  #       watch_users: "any"
+  #     no_activity:
+  #       enabled: true
+  #       days: 360           # Longer for anime
+  #   grace_period: 14
+  #   series:
+  #     enabled: true
+  #     require_ended: true
+  #     watch_users: "any"
+  #     grace_period: 30
+  #   protection:
+  #     enabled: true
+  #     save_days: 30
+  #   leaving_soon:
+  #     collection_name: "TV Leaving Soon"
+  #     description: "These seasons/series will be deleted soon - watch to save them!"
+
+# =============================================================================
+# END OF CONFIGURATION
+# =============================================================================
