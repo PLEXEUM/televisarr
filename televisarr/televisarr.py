@@ -171,7 +171,7 @@ class Televisarr:
 
         logger.debug(f"Processing series: {series_title} (ID: {series_id}, Status: {series_status})")
 
-        # Get show from Plex
+        # Get show from Plex - store the rating key for later use
         show = self.plex.find_show(plex_library, series_title, series_year, series.get("tvdbId"))
         if not show:
             logger.debug(f"Series '{series_title}' not found in Plex, skipping")
@@ -191,7 +191,8 @@ class Televisarr:
             series,
             season_numbers,
             watch_history,
-            show
+            show,
+            plex_library
         )
 
         # Process each season
@@ -202,12 +203,13 @@ class Televisarr:
                 season_number,
                 watch_history,
                 show,
+                plex_library,
                 series_eligible_for_deletion
             )
 
         # If series is eligible for deletion, tag/delete it
         if series_eligible_for_deletion:
-            self._handle_series_deletion(library_config, series, show)
+            self._handle_series_deletion(library_config, series, show, plex_library)
 
     def _process_season(
         self,
@@ -216,6 +218,7 @@ class Televisarr:
         season_number: int,
         watch_history: Dict[str, Dict],
         show: Any,
+        plex_library: Any,
         series_eligible_for_deletion: bool
     ) -> None:
         """
@@ -227,16 +230,17 @@ class Televisarr:
             season_number: Season number to process
             watch_history: Plex watch history
             show: Plex show item
+            plex_library: Plex library section
             series_eligible_for_deletion: Whether the series is eligible for deletion
         """
         series_id = series["id"]
         series_title = series.get("title", "Unknown")
 
-        # Get season watch status from Plex
+        # Get season watch status from Plex - using plex_library directly
         season_watch_status = self.plex.get_show_season_watch_status(
-            plex_library=show.library,  # ✅ Use show.library
+            plex_library=plex_library,
             show_title=series_title,
-            season_number=season_number,  # ✅ Use season_number from function params
+            season_number=season_number,
             year=series.get("year"),
             tvdb_id=series.get("tvdbId")
         )
@@ -255,12 +259,12 @@ class Televisarr:
         )
 
         if is_eligible:
-            self._handle_season_deletion(library_config, series, season_number, show)
+            self._handle_season_deletion(library_config, series, season_number, show, plex_library)
         elif self.state_manager.is_item_in_leaving_soon(
             library_config.name, series_id, season_number
         ):
             # Season was previously tagged but no longer eligible - save it
-            self._save_season(library_config, series, season_number, show)
+            self._save_season(library_config, series, season_number, show, plex_library)
 
     def _check_season_deletion_eligibility(
         self,
@@ -375,7 +379,8 @@ class Televisarr:
         library_config: LibraryConfig,
         series: Dict[str, Any],
         season_number: int,
-        show: Any
+        show: Any,
+        plex_library: Any
     ) -> None:
         """
         Handle season deletion (tag or delete).
@@ -385,6 +390,7 @@ class Televisarr:
             series: Series data from Sonarr
             season_number: Season number
             show: Plex show item
+            plex_library: Plex library section
         """
         library_name = library_config.name
         series_id = series["id"]
@@ -430,7 +436,7 @@ class Televisarr:
             self.seasons_tagged += 1
 
             # Add to Plex collection
-            self._add_to_leaving_soon_collection(library_config, show, season_number)
+            self._add_to_leaving_soon_collection(library_config, plex_library, show, season_number)
             logger.info(f"Tagged season {season_number} of '{series_title}' for deletion")
 
     def _save_season(
@@ -438,7 +444,8 @@ class Televisarr:
         library_config: LibraryConfig,
         series: Dict[str, Any],
         season_number: int,
-        show: Any
+        show: Any,
+        plex_library: Any
     ) -> None:
         """
         Save a season from deletion (remove from TV Leaving Soon).
@@ -448,6 +455,7 @@ class Televisarr:
             series: Series data from Sonarr
             season_number: Season number
             show: Plex show item
+            plex_library: Plex library section
         """
         library_name = library_config.name
         series_id = series["id"]
@@ -471,7 +479,7 @@ class Televisarr:
                 )
 
             # Remove from Plex collection
-            self._remove_from_leaving_soon_collection(library_config, show, season_number)
+            self._remove_from_leaving_soon_collection(library_config, plex_library, show, season_number)
             self.seasons_saved += 1
             logger.info(f"Saved season {season_number} of '{series_title}'")
 
@@ -481,7 +489,8 @@ class Televisarr:
         series: Dict[str, Any],
         season_numbers: List[int],
         watch_history: Dict[str, Dict],
-        show: Any
+        show: Any,
+        plex_library: Any
     ) -> bool:
         """
         Check if a series is eligible for deletion.
@@ -496,6 +505,7 @@ class Televisarr:
             season_numbers: List of season numbers
             watch_history: Plex watch history
             show: Plex show item
+            plex_library: Plex library section
 
         Returns:
             True if eligible for deletion, False otherwise
@@ -515,9 +525,9 @@ class Televisarr:
         # Check if all seasons are fully watched
         for season_num in season_numbers:
             season_watch_status = self.plex.get_show_season_watch_status(
-                plex_library=show.library,  # ✅ Use show.library
+                plex_library=plex_library,
                 show_title=series_title,
-                season_number=season_num,  # ✅ Use season_num from loop
+                season_number=season_num,
                 year=series.get("year"),
                 tvdb_id=series.get("tvdbId")
             )
@@ -533,7 +543,8 @@ class Televisarr:
         self,
         library_config: LibraryConfig,
         series: Dict[str, Any],
-        show: Any
+        show: Any,
+        plex_library: Any
     ) -> None:
         """
         Handle series deletion (tag or delete).
@@ -542,6 +553,7 @@ class Televisarr:
             library_config: Library configuration
             series: Series data from Sonarr
             show: Plex show item
+            plex_library: Plex library section
         """
         library_name = library_config.name
         series_id = series["id"]
@@ -598,13 +610,14 @@ class Televisarr:
             for season in seasons:
                 season_num = season.get("seasonNumber")
                 if season_num is not None:
-                    self._add_to_leaving_soon_collection(library_config, show, season_num)
+                    self._add_to_leaving_soon_collection(library_config, plex_library, show, season_num)
 
             logger.info(f"Tagged series '{series_title}' for deletion")
 
     def _add_to_leaving_soon_collection(
         self,
         library_config: LibraryConfig,
+        plex_library: Any,
         show: Any,
         season_number: int
     ) -> None:
@@ -613,13 +626,13 @@ class Televisarr:
 
         Args:
             library_config: Library configuration
+            plex_library: Plex library section
             show: Plex show item
             season_number: Season number to add
         """
         collection_name = library_config.leaving_soon.collection_name
         description = library_config.leaving_soon.description
 
-        # Get the season
         try:
             episodes = show.episodes()
             season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
@@ -627,15 +640,13 @@ class Televisarr:
                 logger.debug(f"No episodes found for season {season_number}")
                 return
 
-            # Get or create collection
             collection = self.plex.get_or_create_collection(
-                show.library,  # ✅ Use show.library
+                plex_library,
                 collection_name,
                 description=description
             )
 
             if collection:
-                # Add episodes to collection
                 self.plex.set_collection_items(collection, season_episodes)
                 self.plex.set_collection_visibility(collection, home=True, shared=True)
 
@@ -645,6 +656,7 @@ class Televisarr:
     def _remove_from_leaving_soon_collection(
         self,
         library_config: LibraryConfig,
+        plex_library: Any,
         show: Any,
         season_number: int
     ) -> None:
@@ -653,18 +665,18 @@ class Televisarr:
 
         Args:
             library_config: Library configuration
+            plex_library: Plex library section
             show: Plex show item
             season_number: Season number to remove
         """
         collection_name = library_config.leaving_soon.collection_name
 
         try:
-            collection = show.library.collection(collection_name)  # ✅ Use show.library
+            collection = plex_library.collection(collection_name)
             episodes = show.episodes()
             season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
 
             if collection and season_episodes:
-                # Remove these episodes from the collection
                 current_items = collection.items()
                 items_to_remove = [item for item in current_items if item in season_episodes]
                 if items_to_remove:
