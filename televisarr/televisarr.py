@@ -868,18 +868,36 @@ class Televisarr:
                             except Exception as e2:
                                 logger.debug(f"Failed to remove items: {e2}")
                                 return
-    
+
                         # Recreate with just the season
-                        collection = self.plex.get_or_create_collection(
-                         plex_library,
-                            collection_name,
-                            items=[season],
-                            description=leaving_soon_config.description
-                        )
-                        if collection:
+                        try:
+                            # Use createCollection directly to ensure season type
+                            collection = plex_library.createCollection(
+                                title=collection_name,
+                                smart=False,
+                                items=[season]
+                            )
+                            if description:
+                                try:
+                                    collection.editSummary(description)
+                                except Exception:
+                                    pass
                             self.plex.set_collection_visibility(collection, home=True, shared=True)
                             logger.debug(f"Self-healed: recreated collection with season {season_number}")
                             return
+                        except Exception as e:
+                            logger.debug(f"Failed to recreate collection: {e}")
+                            # Fallback: use get_or_create_collection
+                            collection = self.plex.get_or_create_collection(
+                                plex_library,
+                                collection_name,
+                                items=[season],
+                                description=leaving_soon_config.description
+                            )
+                            if collection:
+                                self.plex.set_collection_visibility(collection, home=True, shared=True)
+                                logger.debug(f"Self-healed: recreated collection with season {season_number} (fallback)")
+                                return
                         
                     elif collection and not season:
                         # Fallback: check episodes
