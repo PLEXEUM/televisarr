@@ -500,18 +500,13 @@ class PlexMediaServer:
         show_title: str,
         season_number: int,
         year: Optional[int] = None,
-        tvdb_id: Optional[int] = None
+        tvdb_id: Optional[int] = None,
+        watch_history: Optional[Dict[str, Dict]] = None  # ✅ Add this parameter
     ) -> Dict[str, Any]:
         """
         Get watch status for a specific season of a show.
-
-        Returns:
-            Dict with:
-                - total_episodes: Total episodes in season
-                - watched_episodes: Number of fully watched episodes
-                - all_watched: True if all episodes are watched
-                - last_watched: Most recent watch date (or None)
-                - no_activity: True if no episodes have been watched
+    
+        Uses watch_history dict if provided, otherwise falls back to episode viewCount.
         """
         episodes = self.get_show_episodes(library, show_title, year, tvdb_id)
         season_episodes = [ep for ep in episodes if getattr(ep, 'seasonNumber', None) == season_number]
@@ -528,13 +523,24 @@ class PlexMediaServer:
         watched_count = 0
         last_watched = None
 
-        for episode in season_episodes:
-            is_watched = episode.viewCount is not None and episode.viewCount > 0
-            if is_watched:
-                watched_count += 1
-                if episode.viewedAt:
-                    if last_watched is None or episode.viewedAt > last_watched:
-                        last_watched = episode.viewedAt
+        if watch_history:
+            # Use watch history dict for accurate data
+            for episode in season_episodes:
+                rating_key = str(episode.ratingKey)
+                if rating_key in watch_history:
+                    watched_count += 1
+                    hist_date = watch_history[rating_key]["last_watched"]
+                    if last_watched is None or hist_date > last_watched:
+                        last_watched = hist_date
+        else:
+            # Fallback to viewCount (less reliable)
+            for episode in season_episodes:
+                is_watched = episode.viewCount is not None and episode.viewCount > 0
+                if is_watched:
+                    watched_count += 1
+                    if episode.viewedAt:
+                        if last_watched is None or episode.viewedAt > last_watched:
+                            last_watched = episode.viewedAt
 
         return {
             "total_episodes": len(season_episodes),
@@ -543,6 +549,7 @@ class PlexMediaServer:
             "last_watched": last_watched,
             "no_activity": watched_count == 0,
         }
+
 
     def has_episode_been_watched(self, episode: Any) -> bool:
         """

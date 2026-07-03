@@ -233,7 +233,8 @@ class Televisarr:
             show_title=series_title,
             season_number=season_number,
             year=series.get("year"),
-            tvdb_id=series.get("tvdbId")
+            tvdb_id=series.get("tvdbId"),
+            watch_history=watch_history
         )
 
         total_episodes = season_watch_status["total_episodes"]
