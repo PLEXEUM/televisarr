@@ -241,26 +241,20 @@ class Televisarr:
             logger.debug(f"Season {season_number} has no episodes, skipping")
             return
 
-        # Get the season's added date from Sonarr data
+        # Get the season's added date from Plex (earliest episode added date)
         season_added_date = None
-        for season in series.get("seasons", []):
-            if season.get("seasonNumber") == season_number:
-                if season.get("added"):
-                    try:
-                        # Parse the date and make it timezone-naive for comparison
-                        dt = datetime.fromisoformat(season["added"].replace("Z", "+00:00"))
-                        season_added_date = dt.replace(tzinfo=None)
-                    except (ValueError, TypeError):
-                        pass
-                break
-
-        # If we couldn't get the season added date, use the series added date
-        if not season_added_date and series.get("added"):
-            try:
-                dt = datetime.fromisoformat(series["added"].replace("Z", "+00:00"))
-                season_added_date = dt.replace(tzinfo=None)
-            except (ValueError, TypeError):
-                pass
+        try:
+            episodes = show.episodes()
+            season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
+            if season_episodes:
+                # Get the earliest added date from the season's episodes
+                earliest_added = min(ep.addedAt for ep in season_episodes)
+                if earliest_added:
+                    # Convert to timezone-naive for comparison
+                    season_added_date = earliest_added.replace(tzinfo=None)
+                    logger.debug(f"Season {season_number} added date from Plex: {season_added_date}")
+        except Exception as e:
+            logger.debug(f"Could not get season added date from Plex: {e}")
 
         # Check if season is eligible for deletion
         is_eligible = self._check_season_deletion_eligibility(
@@ -268,7 +262,7 @@ class Televisarr:
             season_watch_status,
             season_number,
             series_id,
-            season_added_date  # ✅ Pass the added date
+            season_added_date
         )
 
         if is_eligible:
