@@ -853,24 +853,18 @@ class Televisarr:
                             return
 
                     if collection and season:
+                        # ✅ FORCE REBUILD: Get all current items and remove them
                         current_items = collection.items()
-                        season_rating_keys = {ep.ratingKey for ep in season_episodes}
-                    
-                        # ✅ NEW: Remove any episodes from this season
-                        episodes_to_remove = [item for item in current_items if item.ratingKey in season_rating_keys]
-                        if episodes_to_remove:
-                            collection.removeItems(episodes_to_remove)
-                            logger.debug(f"Self-healed: removed {len(episodes_to_remove)} episodes from collection")
-                            # Refresh current items after removal
+                        if current_items:
+                            collection.removeItems(current_items)
+                            logger.debug(f"Self-healed: removed {len(current_items)} items from collection")
+                            # Refresh current_items after removal
                             current_items = collection.items()
-                    
-                        # Check if season is already in the collection
-                        season_in_collection = any(item.ratingKey == season.ratingKey for item in current_items)
-                        if not season_in_collection:
-                            collection.addItems([season])
-                            logger.debug(f"Self-healed: added season {season_number} to collection")
-                        else:
-                            logger.debug(f"Season {season_number} already in collection")
+    
+                        # Add the season
+                        collection.addItems([season])
+                        logger.debug(f"Self-healed: added season {season_number} to collection")
+                        return
                         
                     elif collection and not season:
                         # Fallback: check episodes
