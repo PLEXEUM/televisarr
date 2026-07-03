@@ -259,18 +259,7 @@ class PlexMediaServer:
         items: Optional[List[Any]] = None,
         description: Optional[str] = None
     ) -> Optional[Any]:
-        """
-        Get existing collection or create a new one.
-
-        Args:
-            library: Plex library section
-            name: Name of the collection
-            items: Optional list of items to add
-            description: Optional description for the collection
-
-        Returns:
-            Collection object, or None if it doesn't exist and no items to create with
-        """
+        """Get existing collection or create a new one."""
         try:
             collection = library.collection(name)
             if description:
@@ -388,6 +377,77 @@ class PlexMediaServer:
         except Exception as e:
             logger.warning(f"Error clearing collection '{name}': {e}")
             return False
+
+    # ========== NEW LABEL METHODS - ADD HERE ==========
+
+    def add_label(self, item: Any, label: str) -> None:
+        """Add a label to a Plex media item.
+
+        Args:
+            item: The Plex media item.
+            label: The label to add.
+        """
+        try:
+            item.addLabel(label)
+        except Exception as e:
+            logger.debug(f"Could not add label '{label}' to '{item.title}': {e}")
+
+    def remove_label(self, item: Any, label: str) -> None:
+        """Remove a label from a Plex media item.
+
+        Args:
+            item: The Plex media item.
+            label: The label to remove.
+        """
+        try:
+            item.removeLabel(label)
+        except Exception as e:
+            logger.debug(f"Could not remove label '{label}' from '{item.title}': {e}")
+
+    def get_items_with_label(self, library: Any, label: str) -> List[Any]:
+        """Get all items in library with given label.
+
+        Args:
+            library: The Plex library section.
+            label: The label to search for.
+
+        Returns:
+            List of Plex media items with the label.
+        """
+        try:
+            return library.search(label=label)
+        except Exception as e:
+            logger.warning(
+                f"Error searching for items with label '{label}' in library '{library.title}': {e}"
+            )
+            return []
+
+    def remove_label_from_all_items(self, library: Any, label: str) -> int:
+        """Remove a label from all items in a library.
+
+        Args:
+            library: The Plex library section.
+            label: The label to remove.
+
+        Returns:
+            Number of items that had the label removed.
+        """
+        try:
+            items = library.search(label=label)
+            count = 0
+            for item in items:
+                try:
+                    item.removeLabel(label)
+                    count += 1
+                except Exception:
+                    pass
+            logger.debug(f"Removed label '{label}' from {count} items in library '{library.title}'")
+            return count
+        except Exception as e:
+            logger.warning(f"Error removing label '{label}' from library '{library.title}': {e}")
+            return 0
+
+    # ========== END LABEL METHODS ==========
 
     def find_show(
         self,

@@ -124,6 +124,7 @@ class ProtectionConfig(BaseModel):
         ge=1,
     )
 
+# In schema.py, update LeavingSoonConfig
 
 class LeavingSoonConfig(BaseModel):
     """Configuration for the 'TV Leaving Soon' collection."""
@@ -135,6 +136,18 @@ class LeavingSoonConfig(BaseModel):
     description: str = Field(
         default="These seasons/series will be deleted soon - watch to save them!",
         description="Description shown in Plex for the collection",
+    )
+    # NEW: Label support
+    label_name: Optional[str] = Field(
+        default=None,
+        description="Optional label to apply to individual episodes (e.g., 'Leaving Soon'). "
+                    "If set, episodes will be tagged with this label in addition to the collection.",
+        json_schema_extra={"example": "Leaving Soon"},
+    )
+    use_labels_only: bool = Field(
+        default=False,
+        description="If true, only use labels (no collection). Useful for libraries where "
+                    "collections are used for other purposes.",
     )
 
 
