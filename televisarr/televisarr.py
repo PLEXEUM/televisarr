@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
 
+from plexapi.exceptions import NotFound
+
 from televisarr import logger
 from televisarr.schema import TelevisarrConfig, LibraryConfig
 from televisarr.modules.plex import PlexMediaServer
