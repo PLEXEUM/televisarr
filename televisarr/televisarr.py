@@ -786,7 +786,7 @@ class Televisarr:
                 except Exception:
                     pass
 
-            # --- CHECK LABELS (at SEASON level) ---
+            # --- CHECK LABELS ---
             if label_name and season:
                 has_label = False
                 try:
@@ -808,7 +808,27 @@ class Televisarr:
             # --- CHECK COLLECTION ---
             if not use_labels_only:
                 try:
-                    collection = plex_library.collection(collection_name)
+                    # Try to get the collection
+                    collection = None
+                    try:
+                        collection = plex_library.collection(collection_name)
+                    except NotFound:
+                        # Collection doesn't exist, create it
+                        logger.debug(
+                            f"Season {season_number} is in state but collection '{collection_name}' "
+                            f"does not exist - self-healing (creating)"
+                        )
+                        collection = self.plex.get_or_create_collection(
+                            plex_library,
+                            collection_name,
+                            items=season_episodes,
+                            description=leaving_soon_config.description
+                        )
+                        if collection:
+                            self.plex.set_collection_visibility(collection, home=True, shared=True)
+                            logger.debug(f"Self-healed: created collection with {len(season_episodes)} episodes")
+                            return  # Exit early - we just created it with all items
+
                     if collection:
                         current_items = collection.items()
                         season_rating_keys = {ep.ratingKey for ep in season_episodes}
@@ -823,20 +843,6 @@ class Televisarr:
                             missing_items = [ep for ep in season_episodes if ep.ratingKey in missing_keys]
                             collection.addItems(missing_items)
                             logger.debug(f"Self-healed: added {len(missing_items)} episodes to collection")
-                    else:
-                        logger.debug(
-                            f"Season {season_number} is in state but collection '{collection_name}' "
-                            f"does not exist - self-healing"
-                        )
-                        collection = self.plex.get_or_create_collection(
-                            plex_library,
-                            collection_name,
-                            items=season_episodes,
-                            description=leaving_soon_config.description
-                        )
-                        if collection:
-                            self.plex.set_collection_visibility(collection, home=True, shared=True)
-                            logger.debug(f"Self-healed: created collection with {len(season_episodes)} episodes")
                 except Exception as e:
                     logger.debug(f"Self-healing collection check failed for season {season_number}: {e}")
 
