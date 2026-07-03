@@ -853,18 +853,33 @@ class Televisarr:
                             return
 
                     if collection and season:
-                        # ✅ FORCE REBUILD: Get all current items and remove them
-                        current_items = collection.items()
-                        if current_items:
-                            collection.removeItems(current_items)
-                            logger.debug(f"Self-healed: removed {len(current_items)} items from collection")
-                            # Refresh current_items after removal
-                            current_items = collection.items()
+                        # Delete the collection entirely (it has episodes, can't mix media types)
+                        try:
+                            collection.delete()
+                            logger.debug(f"Self-healed: deleted collection '{collection_name}' to rebuild")
+                        except Exception as e:
+                            logger.debug(f"Failed to delete collection: {e}")
+                            # If delete fails, try removing all items
+                            try:
+                                current_items = collection.items()
+                                if current_items:
+                                    collection.removeItems(current_items)
+                                    logger.debug(f"Self-healed: removed {len(current_items)} items from collection")
+                            except Exception as e2:
+                                logger.debug(f"Failed to remove items: {e2}")
+                                return
     
-                        # Add the season
-                        collection.addItems([season])
-                        logger.debug(f"Self-healed: added season {season_number} to collection")
-                        return
+                        # Recreate with just the season
+                        collection = self.plex.get_or_create_collection(
+                         plex_library,
+                            collection_name,
+                            items=[season],
+                            description=leaving_soon_config.description
+                        )
+                        if collection:
+                            self.plex.set_collection_visibility(collection, home=True, shared=True)
+                            logger.debug(f"Self-healed: recreated collection with season {season_number}")
+                            return
                         
                     elif collection and not season:
                         # Fallback: check episodes
