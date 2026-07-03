@@ -658,39 +658,42 @@ class Televisarr:
                 return
 
             # --- Get the season object from Plex ---
-            # Plex seasons are accessible via show.season(season_number)
             season = None
             try:
-                # Try to get the season object directly
                 if hasattr(show, 'season'):
                     season = show.season(season_number)
             except Exception:
                 pass
 
-            # If we couldn't get the season directly, fall back to episodes
             if not season and season_episodes:
-                # Use the first episode's parent (which is the season)
                 try:
                     season = season_episodes[0].parent
                 except Exception:
                     pass
 
-            # --- LABELS (applied at SEASON level, not episode level) ---
+            # --- LABELS (applied at SEASON level) ---
             if label_name and season:
                 self.plex.add_label(season, label_name)
                 logger.debug(f"Added label '{label_name}' to season {season_number} of '{show.title}'")
 
-            # --- COLLECTION (skip if use_labels_only is True) ---
+            # --- COLLECTION (add the SEASON object, not episodes) ---
             collection = None
             if not use_labels_only:
+                # Get or create collection
                 collection = self.plex.get_or_create_collection(
                     plex_library,
                     collection_name,
-                    items=season_episodes,
+                    items=[season] if season else season_episodes,  # ← Add SEASON, fallback to episodes
                     description=description
                 )
 
-                if collection:
+                if collection and season:
+                    # Replace collection contents with just this season
+                    self.plex.set_collection_items(collection, [season])
+                    self.plex.set_collection_visibility(collection, home=True, shared=True)
+                    logger.debug(f"Added season {season_number} to collection '{collection_name}'")
+                elif collection and not season:
+                    # Fallback: add episodes
                     self.plex.set_collection_items(collection, season_episodes)
                     self.plex.set_collection_visibility(collection, home=True, shared=True)
                     logger.debug(f"Added {len(season_episodes)} episodes to collection '{collection_name}'")
@@ -734,21 +737,32 @@ class Televisarr:
                 except Exception:
                     pass
 
-            # --- LABELS (removed at SEASON level) ---
+            # --- LABELS ---
             if label_name and season:
                 self.plex.remove_label(season, label_name)
                 logger.debug(f"Removed label '{label_name}' from season {season_number} of '{show.title}'")
 
-            # --- COLLECTION ---
+            # --- COLLECTION (remove the SEASON object) ---
             if not use_labels_only:
-                collection = plex_library.collection(collection_name)
-                if collection:
-                    current_items = collection.items()
-                    season_rating_keys = {ep.ratingKey for ep in season_episodes}
-                    items_to_remove = [item for item in current_items if item.ratingKey in season_rating_keys]
-                    if items_to_remove:
-                        collection.removeItems(items_to_remove)
-                        logger.debug(f"Removed {len(items_to_remove)} episodes from collection '{collection_name}'")
+                try:
+                    collection = plex_library.collection(collection_name)
+                    if collection and season:
+                        current_items = collection.items()
+                        # Find the season in the collection
+                        items_to_remove = [item for item in current_items if item.ratingKey == season.ratingKey]
+                        if items_to_remove:
+                            collection.removeItems(items_to_remove)
+                            logger.debug(f"Removed season {season_number} from collection '{collection_name}'")
+                    elif collection and not season:
+                        # Fallback: remove episodes
+                        current_items = collection.items()
+                        season_rating_keys = {ep.ratingKey for ep in season_episodes}
+                        items_to_remove = [item for item in current_items if item.ratingKey in season_rating_keys]
+                        if items_to_remove:
+                            collection.removeItems(items_to_remove)
+                            logger.debug(f"Removed {len(items_to_remove)} episodes from collection '{collection_name}'")
+                except Exception as e:
+                    logger.debug(f"Failed to remove season {season_number} from collection: {e}")
 
         except Exception as e:
             logger.debug(f"Failed to remove season {season_number} from leaving_soon: {e}")
@@ -810,7 +824,6 @@ class Televisarr:
             # --- CHECK COLLECTION ---
             if not use_labels_only:
                 try:
-                    # Try to get the collection
                     collection = None
                     try:
                         collection = plex_library.collection(collection_name)
@@ -820,28 +833,52 @@ class Televisarr:
                             f"Season {season_number} is in state but collection '{collection_name}' "
                             f"does not exist - self-healing (creating)"
                         )
-                        collection = self.plex.get_or_create_collection(
-                            plex_library,
-                            collection_name,
-                            items=season_episodes,
-                            description=leaving_soon_config.description
-                        )
+                        if season:
+                            collection = self.plex.get_or_create_collection(
+                                plex_library,
+                                collection_name,
+                                items=[season],
+                                description=leaving_soon_config.description
+                            )
+                        else:
+                            collection = self.plex.get_or_create_collection(
+                                plex_library,
+                                collection_name,
+                                items=season_episodes,
+                                description=leaving_soon_config.description
+                            )
                         if collection:
                             self.plex.set_collection_visibility(collection, home=True, shared=True)
-                            logger.debug(f"Self-healed: created collection with {len(season_episodes)} episodes")
-                            return  # Exit early - we just created it with all items
+                            logger.debug(f"Self-healed: created collection with season {season_number}")
+                            return
 
-                    if collection:
+                    if collection and season:
+                        current_items = collection.items()
+                        season_rating_keys = {ep.ratingKey for ep in season_episodes}
+                    
+                        # ✅ NEW: Remove any episodes from this season
+                        episodes_to_remove = [item for item in current_items if item.ratingKey in season_rating_keys]
+                        if episodes_to_remove:
+                            collection.removeItems(episodes_to_remove)
+                            logger.debug(f"Self-healed: removed {len(episodes_to_remove)} episodes from collection")
+                            # Refresh current items after removal
+                            current_items = collection.items()
+                    
+                        # Check if season is already in the collection
+                        season_in_collection = any(item.ratingKey == season.ratingKey for item in current_items)
+                        if not season_in_collection:
+                            collection.addItems([season])
+                            logger.debug(f"Self-healed: added season {season_number} to collection")
+                        else:
+                            logger.debug(f"Season {season_number} already in collection")
+                        
+                    elif collection and not season:
+                        # Fallback: check episodes
                         current_items = collection.items()
                         season_rating_keys = {ep.ratingKey for ep in season_episodes}
                         existing_keys = {item.ratingKey for item in current_items}
-
                         missing_keys = season_rating_keys - existing_keys
                         if missing_keys:
-                            logger.debug(
-                                f"Season {season_number} is in state but missing {len(missing_keys)} "
-                                f"episodes from collection '{collection_name}' - self-healing"
-                            )
                             missing_items = [ep for ep in season_episodes if ep.ratingKey in missing_keys]
                             collection.addItems(missing_items)
                             logger.debug(f"Self-healed: added {len(missing_items)} episodes to collection")
