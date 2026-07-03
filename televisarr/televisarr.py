@@ -641,12 +641,6 @@ class Televisarr:
     ) -> None:
         """
         Add a season to the TV Leaving Soon collection.
-
-        Args:
-            library_config: Library configuration
-            plex_library: Plex library section
-            show: Plex show item
-            season_number: Season number to add
         """
         leaving_soon_config = library_config.leaving_soon
         collection_name = leaving_soon_config.collection_name
@@ -661,11 +655,28 @@ class Televisarr:
                 logger.debug(f"No episodes found for season {season_number}")
                 return
 
-            # --- LABELS (always applied if label_name is set) ---
-            if label_name:
-                for episode in season_episodes:
-                    self.plex.add_label(episode, label_name)
-                logger.debug(f"Added label '{label_name}' to {len(season_episodes)} episodes in season {season_number}")
+            # --- Get the season object from Plex ---
+            # Plex seasons are accessible via show.season(season_number)
+            season = None
+            try:
+                # Try to get the season object directly
+                if hasattr(show, 'season'):
+                    season = show.season(season_number)
+            except Exception:
+                pass
+
+            # If we couldn't get the season directly, fall back to episodes
+            if not season and season_episodes:
+                # Use the first episode's parent (which is the season)
+                try:
+                    season = season_episodes[0].parent
+                except Exception:
+                    pass
+
+            # --- LABELS (applied at SEASON level, not episode level) ---
+            if label_name and season:
+                self.plex.add_label(season, label_name)
+                logger.debug(f"Added label '{label_name}' to season {season_number} of '{show.title}'")
 
             # --- COLLECTION (skip if use_labels_only is True) ---
             collection = None
@@ -694,12 +705,6 @@ class Televisarr:
     ) -> None:
         """
         Remove a season from the TV Leaving Soon collection.
-
-        Args:
-            library_config: Library configuration
-            plex_library: Plex library section
-            show: Plex show item
-            season_number: Season number to remove
         """
         leaving_soon_config = library_config.leaving_soon
         collection_name = leaving_soon_config.collection_name
@@ -713,13 +718,26 @@ class Televisarr:
             if not season_episodes:
                 return
 
-            # --- LABELS (always removed if label_name is set) ---
-            if label_name:
-                for episode in season_episodes:
-                    self.plex.remove_label(episode, label_name)
-                logger.debug(f"Removed label '{label_name}' from {len(season_episodes)} episodes in season {season_number}")
+            # --- Get the season object ---
+            season = None
+            try:
+                if hasattr(show, 'season'):
+                    season = show.season(season_number)
+            except Exception:
+                pass
 
-            # --- COLLECTION (skip if use_labels_only is True) ---
+            if not season and season_episodes:
+                try:
+                    season = season_episodes[0].parent
+                except Exception:
+                    pass
+
+            # --- LABELS (removed at SEASON level) ---
+            if label_name and season:
+                self.plex.remove_label(season, label_name)
+                logger.debug(f"Removed label '{label_name}' from season {season_number} of '{show.title}'")
+
+            # --- COLLECTION ---
             if not use_labels_only:
                 collection = plex_library.collection(collection_name)
                 if collection:
@@ -742,25 +760,51 @@ class Televisarr:
     ) -> None:
         """
         Ensure a season is actually in the leaving_soon collection/labels.
-        This is a self-healing method for items that are in state but not in Plex.
-    
-        Args:
-            library_config: Library configuration
-            plex_library: Plex library section
-            show: Plex show item
-            season_number: Season number to verify
         """
         leaving_soon_config = library_config.leaving_soon
         collection_name = leaving_soon_config.collection_name
         label_name = leaving_soon_config.label_name
         use_labels_only = leaving_soon_config.use_labels_only
-    
+
         try:
             episodes = show.episodes()
             season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
             if not season_episodes:
                 return
-        
+
+            # --- Get the season object ---
+            season = None
+            try:
+                if hasattr(show, 'season'):
+                    season = show.season(season_number)
+            except Exception:
+                pass
+
+            if not season and season_episodes:
+                try:
+                    season = season_episodes[0].parent
+                except Exception:
+                    pass
+
+            # --- CHECK LABELS (at SEASON level) ---
+            if label_name and season:
+                has_label = False
+                try:
+                    if hasattr(season, 'labels') and season.labels:
+                        for label in season.labels:
+                            if label.tag == label_name:
+                                has_label = True
+                                break
+                except Exception:
+                    pass
+
+                if not has_label:
+                    logger.debug(
+                        f"Season {season_number} of '{show.title}' in state but "
+                        f"missing label '{label_name}' - self-healing"
+                    )
+                    self.plex.add_label(season, label_name)
+
             # --- CHECK COLLECTION ---
             if not use_labels_only:
                 try:
@@ -769,20 +813,17 @@ class Televisarr:
                         current_items = collection.items()
                         season_rating_keys = {ep.ratingKey for ep in season_episodes}
                         existing_keys = {item.ratingKey for item in current_items}
-                    
-                        # Check if all episodes are in the collection
+
                         missing_keys = season_rating_keys - existing_keys
                         if missing_keys:
                             logger.debug(
                                 f"Season {season_number} is in state but missing {len(missing_keys)} "
                                 f"episodes from collection '{collection_name}' - self-healing"
                             )
-                            # Add missing items to collection
                             missing_items = [ep for ep in season_episodes if ep.ratingKey in missing_keys]
                             collection.addItems(missing_items)
                             logger.debug(f"Self-healed: added {len(missing_items)} episodes to collection")
                     else:
-                        # Collection doesn't exist - create it
                         logger.debug(
                             f"Season {season_number} is in state but collection '{collection_name}' "
                             f"does not exist - self-healing"
@@ -798,39 +839,14 @@ class Televisarr:
                             logger.debug(f"Self-healed: created collection with {len(season_episodes)} episodes")
                 except Exception as e:
                     logger.debug(f"Self-healing collection check failed for season {season_number}: {e}")
-        
-            # --- CHECK LABELS ---
-            if label_name:
-                try:
-                    for episode in season_episodes:
-                        # Check if episode has the label
-                        # PlexAPI doesn't have a direct "has_label" method, so we check labels attribute
-                        has_label = False
-                        try:
-                            if hasattr(episode, 'labels') and episode.labels:
-                                for label in episode.labels:
-                                    if label.tag == label_name:
-                                        has_label = True
-                                        break
-                        except Exception:
-                            pass
-                    
-                        if not has_label:
-                            logger.debug(
-                                f"Episode '{episode.title}' (season {season_number}) in state but "
-                                f"missing label '{label_name}' - self-healing"
-                            )
-                            self.plex.add_label(episode, label_name)
-                except Exception as e:
-                    logger.debug(f"Self-healing label check failed for season {season_number}: {e}")
-    
+
         except Exception as e:
             logger.debug(f"Self-healing check failed for season {season_number}: {e}")
     
     def _cleanup_orphaned_labels(self, library_config: LibraryConfig, plex_library: Any) -> None:
         """
-        Remove labels from items that are no longer in the leaving_soon state.
-        This removes ALL labels and re-applies them only to currently tagged seasons.
+        Remove labels from seasons that are no longer in the leaving_soon state.
+        This removes ALL labels from seasons and re-applies them only to currently tagged seasons.
         """
         label_name = library_config.leaving_soon.label_name
         if not label_name:
@@ -839,42 +855,65 @@ class Televisarr:
         library_name = library_config.name
 
         try:
-            # Remove ALL labels from the library (clean slate)
-            removed = self.plex.remove_label_from_all_items(plex_library, label_name)
-        
+            # Get all seasons with the label (not episodes)
+            # Plex search can filter by season type
+            try:
+                # Search for seasons with the label
+                labeled_items = plex_library.search(label=label_name, libtype='season')
+            except Exception:
+                # Fallback: search all and filter
+                labeled_items = [item for item in plex_library.search(label=label_name) 
+                               if hasattr(item, 'seasonNumber') or item.type == 'season']
+
+            removed = len(labeled_items)
+            for item in labeled_items:
+                try:
+                    item.removeLabel(label_name)
+                except Exception:
+                    pass
+
             # Re-apply labels to currently tagged seasons
             tagged_seasons = self.state_manager.get_all_tagged_seasons(library_name)
             count = 0
-        
+
             for series_id_str, seasons in tagged_seasons.items():
                 series_id = int(series_id_str)
                 series = self.sonarr.get_series_by_id(series_id)
                 if not series:
                     continue
-                
+
                 series_title = series.get("title", "Unknown")
                 series_year = series.get("year")
                 tvdb_id = series.get("tvdbId")
-            
+
                 show = self.plex.find_show(plex_library, series_title, series_year, tvdb_id)
                 if not show:
                     continue
-                
+
                 for season_num_str in seasons.keys():
                     season_num = int(season_num_str)
                     try:
-                        episodes = show.episodes()
-                        season_episodes = [ep for ep in episodes if ep.seasonNumber == season_num]
-                        for episode in season_episodes:
-                            self.plex.add_label(episode, label_name)
+                        # Get the season object
+                        season = None
+                        if hasattr(show, 'season'):
+                            season = show.season(season_num)
+                        if not season:
+                            # Fallback: get from episodes
+                            episodes = show.episodes()
+                            season_episodes = [ep for ep in episodes if ep.seasonNumber == season_num]
+                            if season_episodes:
+                                season = season_episodes[0].parent
+
+                        if season:
+                            self.plex.add_label(season, label_name)
                             count += 1
                     except Exception as e:
                         logger.debug(f"Failed to re-apply label for season {season_num}: {e}")
-        
+
             if count > 0 or removed > 0:
                 logger.debug(
                     f"Cleaned up labels for library '{library_name}': removed {removed}, "
-                    f"re-applied {count} labels"
+                    f"re-applied {count} season labels"
                 )
 
         except Exception as e:

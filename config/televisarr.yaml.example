@@ -155,8 +155,6 @@ libraries:
     leaving_soon:
       collection_name: "TV Leaving Soon"
       description: "These seasons/series will be deleted soon - watch to save them!"
-      label_name: "Leaving Soon"    # Apply this label to individual episodes
-      use_labels_only: false        # false = use both collection AND labels
 
   # =========================================================================
   # SECOND LIBRARY EXAMPLE (Optional)
