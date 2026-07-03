@@ -10,6 +10,7 @@ Provides Sonarr API functionality for:
 
 from typing import Optional, List, Dict, Any
 from pyarr.sonarr import SonarrAPI
+from pyarr.exceptions import PyarrResourceNotFound, PyarrServerError
 
 from televisarr import logger
 
@@ -194,8 +195,6 @@ class DSonarr:
         """
         Delete a season and optionally its files.
 
-        This is the primary method for season-level deletion.
-
         Args:
             series_id: Sonarr series ID
             season_number: Season number to delete
@@ -222,6 +221,7 @@ class DSonarr:
                 logger.warning(f"Failed to unmonitor episodes: {e}")
 
             # Delete episode files
+            skip_deleting_season = False
             if delete_files:
                 for episode in episodes:
                     episode_file_id = episode.get("episodeFileId")
@@ -229,22 +229,39 @@ class DSonarr:
                         try:
                             self.instance.del_episode_file(episode_file_id)
                             logger.debug(f"Deleted episode file {episode_file_id}")
+                        except PyarrResourceNotFound:
+                            # Episode file doesn't exist - expected for multi-episode files
+                            logger.debug(f"Episode file already deleted (ID: {episode_file_id})")
+                        except PyarrServerError as e:
+                            error_msg = str(e).lower()
+                            if "in use" in error_msg or "locked" in error_msg:
+                                logger.error(
+                                    f"Cannot delete season {season_number}: Episode file is in use (being played). "
+                                    "Will retry on next run."
+                                )
+                                skip_deleting_season = True
+                                break
+                            else:
+                                logger.error(f"Sonarr error deleting episode file: {e}")
+                                skip_deleting_season = True
+                                break
                         except Exception as e:
                             logger.warning(f"Failed to delete episode file {episode_file_id}: {e}")
+                            skip_deleting_season = True
+                            break
 
-            # Get the series and update season status
+            if skip_deleting_season:
+                return False
+
+            # Update season to be unmonitored
             series = self.get_series_by_id(series_id)
             if series:
-                # Update season to be unmonitored
                 seasons = series.get("seasons", [])
                 for season in seasons:
                     if season.get("seasonNumber") == season_number:
                         season["monitored"] = False
                         break
-
-                # Update the series with the modified season
                 try:
-                    # We need to update the whole series to persist the season change
                     self.instance.upd_series(series)
                     logger.debug(f"Updated series {series_id} season {season_number} to unmonitored")
                 except Exception as e:
@@ -266,8 +283,6 @@ class DSonarr:
         """
         Delete a series and optionally its files.
 
-        This is the primary method for series-level deletion.
-
         Args:
             series_id: Sonarr series ID
             delete_files: Whether to delete the files from disk
@@ -279,15 +294,26 @@ class DSonarr:
         logger.info(f"Deleting series {series_id}")
 
         try:
-            # Get series details for logging
             series = self.get_series_by_id(series_id)
             series_title = series.get("title", "Unknown") if series else "Unknown"
+
+            # Get all episodes and unmonitor them
+            episodes = self.get_episodes(series_id)
+            if episodes:
+                try:
+                    self.instance.upd_episode_monitor([ep["id"] for ep in episodes], False)
+                    logger.debug(f"Unmonitored {len(episodes)} episodes")
+                except Exception as e:
+                    logger.warning(f"Failed to unmonitor episodes: {e}")
 
             # Delete the series
             self.instance.del_series(series_id, delete_files=delete_files, add_exclusion=add_exclusion)
             logger.info(f"Successfully deleted series '{series_title}'")
             return True
 
+        except PyarrServerError as e:
+            logger.error(f"Sonarr error deleting series {series_id}: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to delete series {series_id}: {e}")
             return False
