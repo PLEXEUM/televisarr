@@ -853,51 +853,83 @@ class Televisarr:
                             return
 
                     if collection and season:
-                        # Delete the collection entirely (it has episodes, can't mix media types)
+                        # Check if the collection is already a season-type collection
+                        # If it is, just add the season without deleting
                         try:
-                            collection.delete()
-                            logger.debug(f"Self-healed: deleted collection '{collection_name}' to rebuild")
-                        except Exception as e:
-                            logger.debug(f"Failed to delete collection: {e}")
-                            # If delete fails, try removing all items
+                            # Try to get the collection type by checking if it has episodes or seasons
+                            current_items = collection.items()
+                            is_episode_type = False
+                            is_season_type = False
+        
+                            if current_items:
+                                # Check the type of the first item
+                                first_item = current_items[0]
+                                if hasattr(first_item, 'type'):
+                                    if first_item.type == 'season':
+                                        is_season_type = True
+                                    elif first_item.type == 'episode':
+                                        is_episode_type = True
+        
+                            # If collection is empty or already season-type, just add the season
+                            if not current_items or is_season_type:
+                                # Collection is empty or already has seasons - just add this season
+                                season_in_collection = any(item.ratingKey == season.ratingKey for item in current_items)
+                                if not season_in_collection:
+                                    collection.addItems([season])
+                                    logger.debug(f"Self-healed: added season {season_number} to existing collection")
+                                else:
+                                    logger.debug(f"Season {season_number} already in collection")
+                                return
+        
+                            # If we get here, the collection has episodes - need to rebuild
+                            logger.debug(f"Collection '{collection_name}' has episodes, rebuilding as season-type")
+        
+                            # Delete the collection entirely
                             try:
-                                current_items = collection.items()
-                                if current_items:
-                                    collection.removeItems(current_items)
-                                    logger.debug(f"Self-healed: removed {len(current_items)} items from collection")
-                            except Exception as e2:
-                                logger.debug(f"Failed to remove items: {e2}")
-                                return
-
-                        # Recreate with just the season
-                        try:
-                            # Use createCollection directly to ensure season type
-                            collection = plex_library.createCollection(
-                                title=collection_name,
-                                smart=False,
-                                items=[season]
-                            )
-                            if description:
+                                collection.delete()
+                                logger.debug(f"Self-healed: deleted collection '{collection_name}' to rebuild")
+                            except Exception as e:
+                                logger.debug(f"Failed to delete collection: {e}")
+                                # If delete fails, try removing all items
                                 try:
-                                    collection.editSummary(description)
-                                except Exception:
-                                    pass
-                            self.plex.set_collection_visibility(collection, home=True, shared=True)
-                            logger.debug(f"Self-healed: recreated collection with season {season_number}")
-                            return
-                        except Exception as e:
-                            logger.debug(f"Failed to recreate collection: {e}")
-                            # Fallback: use get_or_create_collection
-                            collection = self.plex.get_or_create_collection(
-                                plex_library,
-                                collection_name,
-                                items=[season],
-                                description=leaving_soon_config.description
-                            )
-                            if collection:
+                                    if current_items:
+                                        collection.removeItems(current_items)
+                                        logger.debug(f"Self-healed: removed {len(current_items)} items from collection")
+                                except Exception as e2:
+                                    logger.debug(f"Failed to remove items: {e2}")
+                                    return  
+
+                            # Recreate with just the season
+                            try:
+                                # Use createCollection directly to ensure season type
+                                collection = plex_library.createCollection(
+                                    title=collection_name,
+                                    smart=False,
+                                    items=[season]
+                                )
+                                if leaving_soon_config.description:
+                                    try:
+                                        collection.editSummary(leaving_soon_config.description)
+                                    except Exception:
+                                        pass
                                 self.plex.set_collection_visibility(collection, home=True, shared=True)
-                                logger.debug(f"Self-healed: recreated collection with season {season_number} (fallback)")
+                                logger.debug(f"Self-healed: recreated collection with season {season_number}")
                                 return
+                            except Exception as e:
+                                logger.debug(f"Failed to recreate collection: {e}")
+                                # Fallback: use get_or_create_collection
+                                collection = self.plex.get_or_create_collection(
+                                    plex_library,
+                                    collection_name,
+                                    items=[season],
+                                    description=leaving_soon_config.description
+                                )
+                                if collection:
+                                    self.plex.set_collection_visibility(collection, home=True, shared=True)
+                                    logger.debug(f"Self-healed: recreated collection with season {season_number} (fallback)")
+                                    return
+                        except Exception as e:
+                            logger.debug(f"Self-healing collection check failed for season {season_number}: {e}")
                         
                     elif collection and not season:
                         # Fallback: check episodes
