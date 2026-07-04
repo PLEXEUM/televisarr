@@ -199,15 +199,24 @@ class Televisarr:
                     "last_watched": None,
                     "no_activity": True,
                 }
-                # Get season added date from Sonarr if available
+                
+                # Get season added date from Sonarr (use series added date as fallback)
                 season_added_date = None
                 try:
-                    sonarr_season = self.sonarr.get_season_by_number(series_id, season_number)
-                    if sonarr_season and sonarr_season.get("statistics"):
-                        # Use the earliest episode air date or series added date as fallback
-                        pass
-                except Exception:
-                    pass
+                    # Try to get series added date
+                    if series.get("added"):
+                        from datetime import datetime
+                        # Sonarr returns ISO format with Z suffix
+                        added_str = series["added"]
+                        if added_str.endswith("Z"):
+                            added_str = added_str[:-1] + "+00:00"
+                        season_added_date = datetime.fromisoformat(added_str)
+                        # Convert to timezone-naive for comparison
+                        if season_added_date.tzinfo:
+                            season_added_date = season_added_date.replace(tzinfo=None)
+                        logger.debug(f"Using series added date for 0-episode cleanup: {season_added_date}")
+                except Exception as e:
+                    logger.debug(f"Could not get series added date from Sonarr: {e}")
                 
                 is_eligible = self._check_season_deletion_eligibility(
                     library_config,
@@ -216,6 +225,7 @@ class Televisarr:
                     series_id,
                     season_added_date
                 )
+
                 if is_eligible:
                     self._handle_season_deletion(library_config, series, season_number, None, plex_library)
             return
