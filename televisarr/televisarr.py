@@ -358,7 +358,7 @@ class Televisarr:
                             return True
                         else:
                             days_remaining = delay_days - days_since
-                            logger.debug(f"Season {season_number} fully watched, waiting {days_remaining} more days")
+                            logger.debug(f"Season {season_number} fully watched, last watched: {last_watched.strftime('%Y-%m-%d')}, {days_since} days ago, waiting {days_remaining} more days (delay: {delay_days})")
                             return False
                     else:
                         # Shouldn't happen (all_watched implies last_watched exists)
