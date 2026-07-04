@@ -228,6 +228,21 @@ class Televisarr:
 
                 if is_eligible:
                     self._handle_season_deletion(library_config, series, season_number, None, plex_library)
+            
+            # ✅ CHECK IF THE SERIES ITSELF SHOULD BE DELETED
+            # For series with 0 episodes in Plex, check if the series is eligible for deletion
+            series_eligible_for_deletion = self._check_series_deletion_eligibility(
+                library_config,
+                series,
+                season_numbers,
+                watch_history,
+                None,  # show is None
+                plex_library
+            )
+            
+            if series_eligible_for_deletion:
+                self._handle_series_deletion(library_config, series, None, plex_library)
+            
             return
 
         # Get all seasons for this series
