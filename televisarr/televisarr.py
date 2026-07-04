@@ -679,10 +679,20 @@ class Televisarr:
             series.get("tvdbId")
         )
 
-        # OVERRIDE: If series has no episodes in Plex and is ended/cancelled, clean it up
+        # OVERRIDE: If series has no episodes in Plex and is ended/cancelled, delete it immediately
         if not all_episodes:
-            logger.info(f"Series '{series_title}' has no episodes in Plex and is ended/cancelled - eligible for deletion (override)")
-            return True
+            logger.info(f"Series '{series_title}' has no episodes in Plex and is ended/cancelled - immediate deletion (override)")
+            # Delete the series immediately (no grace period, no collection)
+            if self.is_dry_run:
+                logger.info(f"[DRY-RUN] Would immediately delete series '{series_title}' (0 episodes, ended)")
+            else:
+                success = self.sonarr.delete_series(series["id"], delete_files=True, add_exclusion=False)
+                if success:
+                    self.series_deleted += 1
+                    logger.info(f"Immediately deleted empty series '{series_title}'")
+                else:
+                    logger.error(f"Failed to delete empty series '{series_title}'")
+            return False  # Return False to prevent further processing
 
         # Calculate series-level watch statistics
         total_episodes = len(all_episodes)
