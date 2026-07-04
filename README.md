@@ -94,6 +94,9 @@ A season is marked for deletion when:
 
 - All episodes are fully watched (based on `watch_users` rule)
 - **OR** No episodes have been watched in X days (if `no_activity` enabled)
+- **AND** The series has ended/cancelled **OR** the season is complete in Sonarr
+
+> **Important:** To prevent accidental deletion during show hiatuses, Televisarr only deletes seasons from **ended/cancelled** series, or seasons that are **complete** (all expected episodes exist in Sonarr). This ensures you never lose access to unaired episodes when a show is on break.
 
 ### Series-Level Deletion
 

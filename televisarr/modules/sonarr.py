@@ -441,6 +441,43 @@ class DSonarr:
             "fully_downloaded": len(downloaded) == len(episodes) if episodes else False,
         }
 
+    def is_season_complete(self, series_id: int, season_number: int) -> bool:
+        """
+        Check if a season is complete in Sonarr (all expected episodes exist).
+
+        Args:
+            series_id: Sonarr series ID
+            season_number: Season number
+
+        Returns:
+            True if the season is complete (all expected episodes are available),
+            False if episodes are still missing.
+        """
+        series = self.get_series_by_id(series_id)
+        if not series:
+            return False
+
+        # Find the season in the series data
+        for season in series.get("seasons", []):
+            if season.get("seasonNumber") == season_number:
+                stats = season.get("statistics", {})
+                total_episodes = stats.get("totalEpisodeCount", 0)
+                episode_count = stats.get("episodeCount", 0)
+                episode_file_count = stats.get("episodeFileCount", 0)
+                
+                # Season is complete if:
+                # 1. We have all episodes (episodeCount == totalEpisodeCount)
+                # 2. AND all episodes have files (episodeFileCount == totalEpisodeCount)
+                # 3. AND totalEpisodeCount > 0 (avoid division by zero)
+                if total_episodes > 0:
+                    return episode_count >= total_episodes and episode_file_count >= total_episodes
+                else:
+                    # If totalEpisodeCount is 0, check if we have at least some episodes
+                    # (This handles edge cases where Sonarr hasn't fully populated data)
+                    return episode_count > 0 and episode_file_count == episode_count
+
+        return False
+
     def get_season_path(self, series_id: int, season_number: int) -> Optional[str]:
         """
         Get the path of a season.

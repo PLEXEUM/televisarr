@@ -82,10 +82,15 @@ libraries:
     # =========================================================================
     # SEASON DELETION RULES
     # =========================================================================
-    
+    #
+    # Seasons are only deleted if the series has ended/cancelled OR the season
+    # is complete in Sonarr (all expected episodes exist). This is standard
+    # behavior to prevent accidental deletion during show hiatuses. No
+    # configuration needed - it just works.
+
     season:
       # Rule 1: Delete fully watched seasons
-        fully_watched:
+      fully_watched:
         enabled: true
         # watch_users: "any" - any user can watch an episode to count it
         # watch_users: "all" - all users must watch every episode
