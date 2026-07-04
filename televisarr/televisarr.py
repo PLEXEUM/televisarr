@@ -199,7 +199,7 @@ class Televisarr:
                     "last_watched": None,
                     "no_activity": True,
                 }
-                
+
                 # Get season added date from Sonarr (use series added date as fallback)
                 season_added_date = None
                 try:
@@ -413,7 +413,7 @@ class Televisarr:
                         logger.debug(f"Season {season_number} is fully watched but no last_watched date, delaying")
                         return False
 
-        # Rule 2: No activity
+        # Rule 2: No activity (or no episodes in Plex)
         no_activity_config = library_config.season.no_activity
         if no_activity_config.get("enabled", False):
             days = no_activity_config.get("days", 180)
@@ -421,7 +421,16 @@ class Televisarr:
             # Check if season has no episodes in Plex
             total_episodes = season_watch_status.get("total_episodes", 0)
             if total_episodes == 0:
-                # No episodes in Plex - use season_added_date (from Plex) or default to checking
+                # No episodes in Plex - check if series has ended before allowing deletion
+                series = self.sonarr.get_series_by_id(series_id)
+                if series:
+                    series_status = series.get("status", "").lower()
+                    is_series_ended = series_status in ["ended", "cancelled"]
+                    if not is_series_ended:
+                        logger.debug(f"Season {season_number} has no episodes but series is continuing - NOT deleting (user may be saving for later)")
+                        return False
+                
+                # Use season_added_date (from Plex) or default to checking
                 if season_added_date:
                     days_since_added = (datetime.now() - season_added_date).days
                     if days_since_added >= days:
