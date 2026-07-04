@@ -443,15 +443,11 @@ class DSonarr:
 
     def is_season_complete(self, series_id: int, season_number: int) -> bool:
         """
-        Check if a season is complete in Sonarr (all expected episodes exist).
+        Check if a season is complete in Sonarr's database.
+        (Does Sonarr know about all expected episodes?)
 
-        Args:
-            series_id: Sonarr series ID
-            season_number: Season number
-
-        Returns:
-            True if the season is complete (all expected episodes are available),
-            False if episodes are still missing.
+        This checks database completeness, NOT file availability.
+        Missing files should NOT trigger protection - that's a different issue.
         """
         series = self.get_series_by_id(series_id)
         if not series:
@@ -463,18 +459,15 @@ class DSonarr:
                 stats = season.get("statistics", {})
                 total_episodes = stats.get("totalEpisodeCount", 0)
                 episode_count = stats.get("episodeCount", 0)
-                episode_file_count = stats.get("episodeFileCount", 0)
                 
-                # Season is complete if:
-                # 1. We have all episodes (episodeCount == totalEpisodeCount)
-                # 2. AND all episodes have files (episodeFileCount == totalEpisodeCount)
-                # 3. AND totalEpisodeCount > 0 (avoid division by zero)
+                # Only check database completeness
+                # If Sonarr knows about all episodes, the season is "complete"
+                # Missing files should NOT trigger protection
                 if total_episodes > 0:
-                    return episode_count >= total_episodes and episode_file_count >= total_episodes
+                    return episode_count >= total_episodes
                 else:
                     # If totalEpisodeCount is 0, check if we have at least some episodes
-                    # (This handles edge cases where Sonarr hasn't fully populated data)
-                    return episode_count > 0 and episode_file_count == episode_count
+                    return episode_count > 0
 
         return False
 
