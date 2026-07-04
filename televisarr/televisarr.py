@@ -179,7 +179,45 @@ class Televisarr:
         # Get show from Plex - store the rating key for later use
         show = self.plex.find_show(plex_library, series_title, series_year, series.get("tvdbId"))
         if not show:
-            logger.debug(f"Series '{series_title}' not found in Plex, skipping")
+            # Series not found in Plex - check if it should be cleaned up (0 episodes)
+            logger.debug(f"Series '{series_title}' not found in Plex, checking for 0-episode cleanup")
+            
+            # Get all seasons for this series
+            seasons = series.get("seasons", [])
+            season_numbers = [s["seasonNumber"] for s in seasons if s.get("seasonNumber") is not None]
+            
+            if not season_numbers:
+                logger.debug(f"No seasons found for series '{series_title}'")
+                return
+            
+            # Process each season with 0 episodes
+            for season_number in season_numbers:
+                season_watch_status = {
+                    "total_episodes": 0,
+                    "watched_episodes": 0,
+                    "all_watched": False,
+                    "last_watched": None,
+                    "no_activity": True,
+                }
+                # Get season added date from Sonarr if available
+                season_added_date = None
+                try:
+                    sonarr_season = self.sonarr.get_season_by_number(series_id, season_number)
+                    if sonarr_season and sonarr_season.get("statistics"):
+                        # Use the earliest episode air date or series added date as fallback
+                        pass
+                except Exception:
+                    pass
+                
+                is_eligible = self._check_season_deletion_eligibility(
+                    library_config,
+                    season_watch_status,
+                    season_number,
+                    series_id,
+                    season_added_date
+                )
+                if is_eligible:
+                    self._handle_season_deletion(library_config, series, season_number, None, plex_library)
             return
 
         # Get all seasons for this series
