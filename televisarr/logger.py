@@ -1,101 +1,83 @@
+"""
+Logging configuration for Televisarr.
+"""
+
 import logging
 import os
 import sys
-from logging import handlers
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 # These settings are for file logging only
 FILENAME = "televisarr.log"
-MAX_SIZE = 5000000  # 5 MB
-MAX_FILES = 5
-
-logging.basicConfig()
-
-# Televisarr logger
-logger = logging.getLogger("televisarr")
+LOG_DIR = Path("/config/logs")
+MAX_DAYS = 5  # Keep 5 days of logs (configurable)
 
 
-class LogLevelFilter(logging.Filter):
-    def __init__(self, max_level):
-        super(LogLevelFilter, self).__init__()
-        self.max_level = max_level
-
-    def filter(self, record):
-        return record.levelno <= self.max_level
-
-
-def init_logger(console=False, log_dir=False, verbose=False):
+def init_logger(console=False, log_dir=None, verbose=False, max_days=None):
     """
-    Setup logging for Televisarr.
+    Setup logging for Televisarr with daily rotation.
     
     Args:
         console: Whether to log to console
         log_dir: Directory for log files
         verbose: Whether to enable debug logging
+        max_days: Number of days to keep (default: 5)
     """
-    remove_old_handlers()
-    configure_logger(verbose)
-
-    if log_dir:
-        setup_file_logger(log_dir)
-
-    if console:
-        setup_console_logger()
-
-
-def remove_old_handlers():
-    log_handlers = logger.handlers[:]
-    for handler in log_handlers:
-        if isinstance(handler, handlers.RotatingFileHandler):
-            handler.close()
-        elif isinstance(handler, logging.StreamHandler):
-            handler.flush()
-        logger.removeHandler(handler)
-
-
-def configure_logger(verbose):
-    logger.propagate = False
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-
-def setup_file_logger(log_dir):
+    # Use provided log_dir or default
+    log_path = Path(log_dir) / FILENAME if log_dir else LOG_DIR / FILENAME
+    max_days = max_days or MAX_DAYS
+    
     # Create log directory if it doesn't exist
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Get the root logger
+    logger = logging.getLogger("televisarr")
+    
+    # Remove existing handlers to avoid duplicates
+    logger.handlers.clear()
+    
+    # Set log level
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    logger.propagate = False
+    
+    # File handler with daily rotation
+    file_handler = TimedRotatingFileHandler(
+        str(log_path),
+        when="midnight",      # rotate at midnight
+        interval=1,           # every day
+        backupCount=max_days, # keep X days
+        encoding="utf-8"
+    )
+    file_handler.suffix = "%Y-%m-%d"  # televisarr.log.2026-07-04 format
     
     file_formatter = logging.Formatter(
         "%(asctime)s - %(levelname)-7s :: %(filename)s :: %(name)s : %(message)s",
         "%Y-%m-%d %H:%M:%S",
     )
-
-    filename = os.path.join(log_dir, FILENAME)
-    file_handler = handlers.RotatingFileHandler(
-        filename, maxBytes=MAX_SIZE, backupCount=MAX_FILES, encoding="utf-8"
-    )
-    file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
+    
+    # Console handler (for Docker logs)
+    if console:
+        console_formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s :: %(filename)s :: %(name)s : %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(console_formatter)
+        console_handler.setLevel(logging.DEBUG)
+        logger.addHandler(console_handler)
+    
+    logger.info(f"Logging to {log_path} with {max_days} days retention")
 
 
-def setup_console_logger():
-    console_formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s :: %(filename)s :: %(name)s : %(message)s",
-        "%Y-%m-%d %H:%M:%S",
-    )
+# The logger object that other modules will import
+logger = logging.getLogger("televisarr")
 
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(console_formatter)
-    stdout_handler.setLevel(logging.DEBUG)
-    stdout_handler.addFilter(LogLevelFilter(logging.INFO))
-
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setFormatter(console_formatter)
-    stderr_handler.setLevel(logging.WARNING)
-
-    logger.addHandler(stdout_handler)
-    logger.addHandler(stderr_handler)
-
-
-# Expose logger methods
+# Convenience methods (these work because logger is the same instance
+# that init_logger() configures)
 info = logger.info
 warn = logger.warning
 error = logger.error
