@@ -295,6 +295,7 @@ class Televisarr:
         2. OR No episodes have been watched in X days (no_activity rule)
         3. OR Partially watched after X days (partially_watched rule, optional)
         4. Season must be from an ended/cancelled series OR be complete in Sonarr
+           OR have a season finale flag (finaleType == "season")
            (ONLY for fully watched seasons - prevents deletion during hiatuses)
         """
 
@@ -320,10 +321,21 @@ class Televisarr:
             is_series_ended = series_status in ["ended", "cancelled"]
             is_season_complete = self.sonarr.is_season_complete(series_id, season_number)
 
-            if not is_series_ended and not is_season_complete:
+            # Check if season has a season finale flag
+            episodes = self.sonarr.get_episodes_by_season(series_id, season_number)
+            has_season_finale = any(
+                ep.get("finaleType") == "season"
+                for ep in episodes
+            )
+
+            # PROTECT only if:
+            # - Series is continuing AND
+            # - Season is incomplete in Sonarr DB AND
+            # - Season does NOT have a season finale flag
+            if not is_series_ended and not is_season_complete and not has_season_finale:
                 logger.debug(
                     f"Season {season_number} of '{series.get('title', 'Unknown')}' is fully watched but "
-                    f"series is continuing and season is incomplete in Sonarr - PROTECTED from deletion"
+                    f"series is continuing, season is incomplete, and no season finale - PROTECTED from deletion"
                 )
                 return False
 
