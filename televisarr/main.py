@@ -34,44 +34,73 @@ def cleanup_stale_lock():
     1. It's older than 10 minutes (likely from a crashed process)
     2. The PID in the file no longer exists (on Unix)
     """
+    logger.debug(f"Checking for stale lock file at: {LOCK_FILE}")
+    
     if not os.path.exists(LOCK_FILE):
+        logger.debug("No lock file found - clean start")
         return
 
     try:
-        # Check file age first - if older than 10 minutes, it's stale
+        # Get file stats
         mtime = os.path.getmtime(LOCK_FILE)
         age_seconds = time.time() - mtime
+        age_minutes = age_seconds / 60
         
+        logger.debug(f"Lock file exists - age: {age_minutes:.1f} minutes ({age_seconds:.0f} seconds)")
+        
+        # Read PID if possible
+        pid_content = None
+        try:
+            with open(LOCK_FILE, "r") as f:
+                pid_content = f.read().strip()
+            logger.debug(f"Lock file contains PID: {pid_content}")
+        except Exception as e:
+            logger.debug(f"Could not read PID from lock file: {e}")
+
+        # Check 1: File age - if older than 10 minutes, it's stale
         if age_seconds > 600:  # 10 minutes
             logger.warning(
-                f"Removing stale lock file (modified {age_seconds:.0f} seconds ago, > 10 minutes)"
+                f"Removing stale lock file (modified {age_minutes:.1f} minutes ago, > 10 minutes)"
             )
             os.remove(LOCK_FILE)
+            logger.debug("Stale lock file removed (age check)")
             return
 
-        # On Unix, also check if the PID still exists
-        if sys.platform != "win32":
+        # Check 2: On Unix, check if the PID still exists
+        if sys.platform != "win32" and pid_content:
             try:
-                with open(LOCK_FILE, "r") as f:
-                    old_pid = int(f.read().strip())
+                old_pid = int(pid_content)
+                logger.debug(f"Checking if PID {old_pid} is still running...")
                 
                 # Check if process exists (signal 0 doesn't kill, just checks)
                 try:
                     os.kill(old_pid, 0)
-                    # Process exists, lock is valid
                     logger.debug(f"Lock file valid: PID {old_pid} is running")
-                except OSError:
-                    # Process doesn't exist - stale lock
+                except OSError as e:
                     logger.warning(
-                        f"Removing stale lock file (PID {old_pid} no longer exists)"
+                        f"Removing stale lock file (PID {old_pid} no longer exists, error: {e})"
                     )
                     os.remove(LOCK_FILE)
+                    logger.debug("Stale lock file removed (PID check)")
+                    return
             except (ValueError, FileNotFoundError, OSError) as e:
-                # Invalid lock file content, remove it
-                logger.warning(f"Removing invalid lock file: {e}")
+                logger.warning(f"Removing invalid lock file (invalid PID content): {e}")
                 os.remove(LOCK_FILE)
+                logger.debug("Invalid lock file removed")
+                return
+
+        # Check 3: On Windows, we rely on age check only
+        if sys.platform == "win32":
+            logger.debug(f"Lock file is {age_minutes:.1f} minutes old - keeping (under 10 minute threshold)")
+            logger.debug("On Windows, locks are only cleaned up by age (> 10 minutes)")
+            
+        # If we get here, lock file is considered valid
+        logger.debug("Lock file is valid - keeping it")
+
     except OSError as e:
         logger.debug(f"Could not check lock file: {e}")
+    except Exception as e:
+        logger.debug(f"Unexpected error checking lock file: {e}")
 
 
 def acquire_instance_lock() -> bool:
