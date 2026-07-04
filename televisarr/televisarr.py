@@ -295,37 +295,12 @@ class Televisarr:
         2. OR No episodes have been watched in X days (no_activity rule)
         3. OR Partially watched after X days (partially_watched rule, optional)
         4. Season must be from an ended/cancelled series OR be complete in Sonarr
-
-        Args:
-            library_config: Library configuration
-            season_watch_status: Season watch status from Plex
-            season_number: Season number
-            series_id: Sonarr series ID
-            season_added_date: Date the season was added to Plex
-
-        Returns:
-            True if eligible for deletion, False otherwise
+           (ONLY for fully watched seasons - prevents deletion during hiatuses)
         """
-        # Check if season is currently protected
+
+        # Check if season is currently protected (from state manager)
         if self.state_manager.is_season_protected(library_config.name, series_id, season_number):
             logger.debug(f"Season {season_number} is protected, skipping")
-            return False
-        
-        # ---- NEW: Check if season can be deleted (ended series OR complete season) ----
-        series = self.sonarr.get_series_by_id(series_id)
-        if not series:
-            logger.debug(f"Series {series_id} not found in Sonarr, skipping")
-            return False
-
-        series_status = series.get("status", "").lower()
-        is_series_ended = series_status in ["ended", "cancelled"]
-        is_season_complete = self.sonarr.is_season_complete(series_id, season_number)
-
-        if not is_series_ended and not is_season_complete:
-            logger.debug(
-                f"Season {season_number} from continuing series '{series.get('title', 'Unknown')}' "
-                f"is not complete in Sonarr, skipping deletion"
-            )
             return False
 
         total_episodes = season_watch_status["total_episodes"]
@@ -333,6 +308,24 @@ class Televisarr:
         all_watched = season_watch_status["all_watched"]
         last_watched = season_watch_status["last_watched"]
         no_activity = season_watch_status["no_activity"]
+
+        # ---- PROTECTION CHECK: Only for FULLY WATCHED seasons ----
+        if all_watched:
+            series = self.sonarr.get_series_by_id(series_id)
+            if not series:
+                logger.debug(f"Series {series_id} not found in Sonarr, skipping")
+                return False
+
+            series_status = series.get("status", "").lower()
+            is_series_ended = series_status in ["ended", "cancelled"]
+            is_season_complete = self.sonarr.is_season_complete(series_id, season_number)
+
+            if not is_series_ended and not is_season_complete:
+                logger.debug(
+                    f"Season {season_number} of '{series.get('title', 'Unknown')}' is fully watched but "
+                    f"series is continuing and season is incomplete in Sonarr - PROTECTED from deletion"
+                )
+                return False
 
         # Rule 1: Fully watched (with optional delay)
         fully_watched_config = library_config.season.fully_watched
