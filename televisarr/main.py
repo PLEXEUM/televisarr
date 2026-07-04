@@ -26,6 +26,54 @@ LOCK_FILE = "/config/.televisarr.lock"
 _lock_file_handle = None
 
 
+def cleanup_stale_lock():
+    """
+    Remove stale lock file if it exists.
+    
+    A lock file is considered stale if:
+    1. It's older than 10 minutes (likely from a crashed process)
+    2. The PID in the file no longer exists (on Unix)
+    """
+    if not os.path.exists(LOCK_FILE):
+        return
+
+    try:
+        # Check file age first - if older than 10 minutes, it's stale
+        mtime = os.path.getmtime(LOCK_FILE)
+        age_seconds = time.time() - mtime
+        
+        if age_seconds > 600:  # 10 minutes
+            logger.warning(
+                f"Removing stale lock file (modified {age_seconds:.0f} seconds ago, > 10 minutes)"
+            )
+            os.remove(LOCK_FILE)
+            return
+
+        # On Unix, also check if the PID still exists
+        if sys.platform != "win32":
+            try:
+                with open(LOCK_FILE, "r") as f:
+                    old_pid = int(f.read().strip())
+                
+                # Check if process exists (signal 0 doesn't kill, just checks)
+                try:
+                    os.kill(old_pid, 0)
+                    # Process exists, lock is valid
+                    logger.debug(f"Lock file valid: PID {old_pid} is running")
+                except OSError:
+                    # Process doesn't exist - stale lock
+                    logger.warning(
+                        f"Removing stale lock file (PID {old_pid} no longer exists)"
+                    )
+                    os.remove(LOCK_FILE)
+            except (ValueError, FileNotFoundError, OSError) as e:
+                # Invalid lock file content, remove it
+                logger.warning(f"Removing invalid lock file: {e}")
+                os.remove(LOCK_FILE)
+    except OSError as e:
+        logger.debug(f"Could not check lock file: {e}")
+
+
 def acquire_instance_lock() -> bool:
     """
     Try to acquire an exclusive lock to ensure only one instance runs.
@@ -35,12 +83,31 @@ def acquire_instance_lock() -> bool:
     """
     global _lock_file_handle
 
-    # Skip on Windows (primarily for local development)
+    # On Windows, use a simpler file-based lock since fcntl isn't available
     if sys.platform == "win32":
-        return True
+        try:
+            # Clean up stale lock first
+            cleanup_stale_lock()
+            
+            # Try to create the lock file exclusively
+            if os.path.exists(LOCK_FILE):
+                return False
+            
+            with open(LOCK_FILE, "w") as f:
+                f.write(str(os.getpid()))
+            
+            atexit.register(release_instance_lock)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to acquire lock on Windows: {e}")
+            return False
 
+    # Unix/Linux: use fcntl flock
     try:
         import fcntl
+        
+        # Clean up stale lock first
+        cleanup_stale_lock()
 
         _lock_file_handle = open(LOCK_FILE, "w")
         fcntl.flock(_lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -64,10 +131,12 @@ def release_instance_lock() -> None:
 
     if _lock_file_handle:
         try:
-            import fcntl
-            fcntl.flock(_lock_file_handle.fileno(), fcntl.LOCK_UN)
+            if sys.platform != "win32":
+                import fcntl
+                fcntl.flock(_lock_file_handle.fileno(), fcntl.LOCK_UN)
             _lock_file_handle.close()
-            os.remove(LOCK_FILE)
+            if os.path.exists(LOCK_FILE):
+                os.remove(LOCK_FILE)
         except Exception:
             pass
         _lock_file_handle = None

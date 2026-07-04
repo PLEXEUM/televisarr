@@ -99,12 +99,6 @@ class TelevisarrScheduler:
         )
 
     def _run_televisarr(self) -> bool:
-        """
-        Execute Televisarr cleanup job.
-
-        Returns:
-            bool: True if run completed successfully, False if there were fatal errors.
-        """
         from televisarr.televisarr import Televisarr
 
         logger.info("=" * 60)
@@ -113,11 +107,12 @@ class TelevisarrScheduler:
 
         try:
             televisarr = Televisarr(self.config)
+        
+            # ← THIS LINE IS MISSING!
+            televisarr.run()
+        
             if televisarr.has_fatal_errors():
-                logger.error(
-                    "All libraries failed due to configuration errors. "
-                    "Please check your configuration and fix the errors above."
-                )
+                logger.error("All libraries failed due to configuration errors...")
                 return False
             if self.config.dry_run:
                 logger.info("[DRY-RUN] Scheduled run completed successfully (no changes were made)")
@@ -126,8 +121,9 @@ class TelevisarrScheduler:
             return True
         except Exception as e:
             logger.error(f"Scheduled run failed: {e}")
-            # Don't re-raise - we want the scheduler to continue for transient errors
-            return True  # Not a config error, allow retries
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False 
 
     def start(self):
         """
