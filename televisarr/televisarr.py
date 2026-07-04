@@ -613,16 +613,17 @@ class Televisarr:
         plex_library: Any
     ) -> bool:
         """
-        Check if a series is eligible for deletion.
+        Check if a series is eligible for deletion (blanket rule).
 
-        Rules:
-        1. All seasons are fully watched
-        2. Series status is 'ended' or 'cancelled' (if require_ended is True)
+        Rules (applied to ALL episodes across ALL seasons):
+        1. Fully watched: All episodes watched (with optional delay)
+        2. No activity: Zero episodes watched, series added X days ago
+        3. Partially watched: Some episodes watched, no activity for X days
 
         Args:
             library_config: Library configuration
             series: Series data from Sonarr
-            season_numbers: List of season numbers
+            season_numbers: List of season numbers (unused - kept for compatibility)
             watch_history: Plex watch history
             show: Plex show item
             plex_library: Plex library section
@@ -635,6 +636,19 @@ class Televisarr:
 
         series_title = series.get("title", "Unknown")
         series_status = series.get("status", "").lower()
+        series_added_date = None
+
+        # Get series added date from Sonarr
+        try:
+            if series.get("added"):
+                added_str = series["added"]
+                if added_str.endswith("Z"):
+                    added_str = added_str[:-1] + "+00:00"
+                series_added_date = datetime.fromisoformat(added_str)
+                if series_added_date.tzinfo:
+                    series_added_date = series_added_date.replace(tzinfo=None)
+        except Exception:
+            pass
 
         # Check if series has ended
         if library_config.series.require_ended:
@@ -642,22 +656,57 @@ class Televisarr:
                 logger.debug(f"Series '{series_title}' is still continuing (status: {series_status}), skipping series deletion")
                 return False
 
-        # Check if all seasons are fully watched
-        for season_num in season_numbers:
-            season_watch_status = self.plex.get_show_season_watch_status(
-                library=plex_library,
-                show_title=series_title,
-                season_number=season_num,
-                year=series.get("year"),
-                tvdb_id=series.get("tvdbId")
+        # Get ALL episodes for the series from Plex
+        all_episodes = self.plex.get_show_episodes(
+            plex_library,
+            series_title,
+            series.get("year"),
+            series.get("tvdbId")
+        )
+
+        # OVERRIDE: If series has no episodes in Plex and is ended/cancelled, clean it up
+        if not all_episodes:
+            logger.info(f"Series '{series_title}' has no episodes in Plex and is ended/cancelled - eligible for deletion (override)")
+            return True
+
+        # Calculate series-level watch statistics
+        total_episodes = len(all_episodes)
+        watched_episodes = [ep for ep in all_episodes if self.plex.has_episode_been_watched(ep)]
+        watched_count = len(watched_episodes)
+
+        last_watched = None
+        if watched_episodes:
+            last_watched = max(
+                self.plex.get_last_watched_date(ep) or datetime.min
+                for ep in watched_episodes
             )
+            if last_watched == datetime.min:
+                last_watched = None
 
-            if not season_watch_status["all_watched"]:
-                logger.debug(f"Season {season_num} of '{series_title}' is not fully watched, skipping series deletion")
-                return False
+        # Build a synthetic season_watch_status for the entire series
+        series_watch_status = {
+            "total_episodes": total_episodes,
+            "watched_episodes": watched_count,
+            "all_watched": watched_count == total_episodes and total_episodes > 0,
+            "last_watched": last_watched,
+            "no_activity": watched_count == 0,
+        }
 
-        logger.debug(f"Series '{series_title}' is fully watched and ended, eligible for deletion")
-        return True
+        # Check if series is eligible using the SAME season deletion logic
+        is_eligible = self._check_season_deletion_eligibility(
+            library_config,
+            series_watch_status,
+            season_number=0,  # Not used for series-level check
+            series_id=series["id"],
+            season_added_date=series_added_date
+        )
+
+        if is_eligible:
+            logger.debug(f"Series '{series_title}' is eligible for deletion (blanket rule)")
+        else:
+            logger.debug(f"Series '{series_title}' is not eligible for deletion")
+
+        return is_eligible
 
     def _handle_series_deletion(
         self,
