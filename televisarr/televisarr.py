@@ -292,7 +292,7 @@ class Televisarr:
 
         Rules:
         1. All episodes are fully watched (fully_watched rule) - with optional delay
-        2. OR No episodes have been watched in X days (no_activity rule)
+        2. OR No episodes have been watched OR no episodes exist in Plex (no_activity rule)
         3. OR Partially watched after X days (partially_watched rule, optional)
         4. Season must be from an ended/cancelled series OR be complete in Sonarr
            OR have a season finale flag (finaleType == "season")
@@ -369,6 +369,25 @@ class Televisarr:
         no_activity_config = library_config.season.no_activity
         if no_activity_config.get("enabled", False):
             days = no_activity_config.get("days", 180)
+            
+            # Check if season has no episodes in Plex
+            total_episodes = season_watch_status.get("total_episodes", 0)
+            if total_episodes == 0:
+                # No episodes in Plex - use season_added_date (from Plex) or default to checking
+                if season_added_date:
+                    days_since_added = (datetime.now() - season_added_date).days
+                    if days_since_added >= days:
+                        logger.debug(f"Season {season_number} has no episodes in Plex for {days_since_added} days (threshold: {days}), eligible")
+                        return True
+                    else:
+                        logger.debug(f"Season {season_number} has no episodes in Plex but only {days_since_added} days since added (threshold: {days})")
+                        return False
+                else:
+                    # No added date available - conservative approach
+                    logger.debug(f"Season {season_number} has no episodes in Plex but no added date available, delaying")
+                    return False
+            
+            # Original no_activity logic (has episodes but no watches)
             if no_activity:
                 if season_added_date:
                     days_since_added = (datetime.now() - season_added_date).days
