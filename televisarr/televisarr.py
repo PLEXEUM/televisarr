@@ -779,24 +779,43 @@ class Televisarr:
             # --- COLLECTION (add the SEASON object, not episodes) ---
             collection = None
             if not use_labels_only:
-                # Get or create collection
+                # Get or create collection - pass season to create it if it doesn't exist
                 collection = self.plex.get_or_create_collection(
                     plex_library,
                     collection_name,
-                    items=[season] if season else season_episodes,  # ← Add SEASON, fallback to episodes
+                    items=[season] if season else season_episodes,
                     description=description
                 )
 
                 if collection and season:
-                    # Replace collection contents with just this season
-                    self.plex.set_collection_items(collection, [season])
+                    # Get current items in collection
+                    current_items = collection.items()
+                    
+                    # Check if season is already in the collection
+                    season_in_collection = any(item.ratingKey == season.ratingKey for item in current_items)
+                    
+                    if not season_in_collection:
+                        # ADD the season to the collection (don't replace)
+                        collection.addItems([season])
+                        logger.debug(f"Added season {season_number} to collection '{collection_name}'")
+                    else:
+                        logger.debug(f"Season {season_number} already in collection '{collection_name}'")
+                    
                     self.plex.set_collection_visibility(collection, home=True, shared=True)
-                    logger.debug(f"Added season {season_number} to collection '{collection_name}'")
+                    
                 elif collection and not season:
                     # Fallback: add episodes
-                    self.plex.set_collection_items(collection, season_episodes)
+                    current_items = collection.items()
+                    season_rating_keys = {ep.ratingKey for ep in season_episodes}
+                    existing_keys = {item.ratingKey for item in current_items}
+                    missing_keys = season_rating_keys - existing_keys
+                    
+                    if missing_keys:
+                        missing_items = [ep for ep in season_episodes if ep.ratingKey in missing_keys]
+                        collection.addItems(missing_items)
+                        logger.debug(f"Added {len(missing_items)} episodes to collection '{collection_name}'")
+                    
                     self.plex.set_collection_visibility(collection, home=True, shared=True)
-                    logger.debug(f"Added {len(season_episodes)} episodes to collection '{collection_name}'")
 
         except Exception as e:
             logger.warning(f"Failed to add season {season_number} to leaving_soon: {e}")
