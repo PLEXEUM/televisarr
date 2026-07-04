@@ -100,17 +100,21 @@ class TelevisarrScheduler:
 
     def _run_televisarr(self) -> bool:
         from televisarr.televisarr import Televisarr
+        from televisarr.main import acquire_instance_lock, release_instance_lock
 
         logger.info("=" * 60)
         logger.info(f"Scheduled run starting at {datetime.now().isoformat()}")
         logger.info("=" * 60)
 
+        # Acquire lock for this run
+        if not acquire_instance_lock():
+            logger.warning("Another televisarr instance is already running, skipping this scheduled run")
+            return False
+
         try:
             televisarr = Televisarr(self.config)
-        
-            # ← THIS LINE IS MISSING!
             televisarr.run()
-        
+
             if televisarr.has_fatal_errors():
                 logger.error("All libraries failed due to configuration errors...")
                 return False
@@ -123,7 +127,11 @@ class TelevisarrScheduler:
             logger.error(f"Scheduled run failed: {e}")
             import traceback
             logger.debug(traceback.format_exc())
-            return False 
+            return False
+        finally:
+            # Always release the lock when done
+            release_instance_lock()
+            logger.debug("Released instance lock")
 
     def start(self):
         """

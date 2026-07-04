@@ -296,57 +296,62 @@ def main() -> None:
     elif args.scheduler:
         scheduler_enabled = True
 
-    # Check for another running instance
-    if not acquire_instance_lock():
-        logger.warning("=" * 60)
-        logger.warning("Another televisarr instance is already running!")
-        logger.warning("=" * 60)
-        if scheduler_enabled:
-            logger.warning(
-                "The built-in scheduler is enabled by default. "
-                "If you're using an external scheduler (Ofelia, cron), either:"
-            )
-            logger.warning("")
-            logger.warning("  1. Remove Ofelia and use the built-in scheduler (recommended)")
-            logger.warning("")
-            logger.warning("  2. Or disable the built-in scheduler in televisarr.yaml:")
-            logger.warning("     scheduler:")
-            logger.warning("       enabled: false")
-        else:
-            logger.warning(
-                "A previous run may still be in progress. "
-                "Wait for it to complete or check for stuck processes."
-            )
-        logger.warning("Exiting to prevent duplicate runs.")
-        sys.exit(1)
-
-    # Validate connections
-    if not validate_connections(config):
-        hang_on_error(
-            "Failed to validate connections to Plex and/or Sonarr. "
-            "Please check your configuration and ensure services are running."
-        )
-
     if scheduler_enabled:
-        # Run in scheduler mode (long-lived process)
+        # Scheduler mode: don't acquire lock yet (will acquire during job execution)
+        logger.info("Starting in scheduler mode (lock will be acquired during scheduled runs)")
+        
+        # Validate connections before starting scheduler
+        if not validate_connections(config):
+            hang_on_error(
+                "Failed to validate connections to Plex and/or Sonarr. "
+                "Please check your configuration and ensure services are running."
+            )
+        
         from televisarr.scheduler import TelevisarrScheduler
-
-        logger.info("Starting in scheduler mode")
         scheduler = TelevisarrScheduler(config)
+        
+        # Run once on startup if configured
+        if config.scheduler and config.scheduler.run_on_startup:
+            logger.info("run_on_startup enabled, executing initial run...")
+            success = scheduler._run_televisarr()
+            if not success:
+                hang_on_error(
+                    "Initial run failed due to configuration errors. "
+                    "Scheduler will not start until configuration is fixed."
+                )
+        
         scheduler.start()  # Blocks until shutdown
     else:
-        # Run once and exit
+        # Run-once mode: acquire lock and run
+        if not acquire_instance_lock():
+            logger.warning("=" * 60)
+            logger.warning("Another televisarr instance is already running!")
+            logger.warning("=" * 60)
+            logger.warning("Exiting to prevent duplicate runs.")
+            sys.exit(1)
+        
+        if not validate_connections(config):
+            hang_on_error(
+                "Failed to validate connections to Plex and/or Sonarr. "
+                "Please check your configuration and ensure services are running."
+            )
+        
         logger.info("Running in single-run mode")
         success = run_televisarr(config)
-
+        
+        # Release lock before exiting
+        release_instance_lock()
+        
         if not success:
             hang_on_error(
                 "Televisarr run failed due to configuration errors. "
                 "Please check your configuration and fix the errors above."
             )
-
+        
         sys.exit(0)
 
+# Export lock functions for scheduler
+__all__ = ['acquire_instance_lock', 'release_instance_lock', 'cleanup_stale_lock']
 
 if __name__ == "__main__":
     main()
