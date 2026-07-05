@@ -346,7 +346,7 @@ class Televisarr:
                 if earliest_added:
                     # Convert to timezone-naive for comparison
                     season_added_date = earliest_added.replace(tzinfo=None)
-                    logger.debug(f"Season {season_number} added date from Plex: {season_added_date}")
+                    logger.debug(f"Season {season_number} added date from Plex: {season_added_date.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             logger.debug(f"Could not get season added date from Plex: {e}")
 
@@ -446,7 +446,7 @@ class Televisarr:
                             return True
                         else:
                             days_remaining = delay_days - days_since
-                            logger.debug(f"Season {season_number} fully watched, last watched: {last_watched.strftime('%Y-%m-%d')}, {days_since} days ago, waiting {days_remaining} more days (delay: {delay_days})")
+                            logger.debug(f"Season {season_number} fully watched, last watched: {last_watched.strftime('%Y-%m-%d %H:%M:%S')}, {days_since} days ago, waiting {days_remaining} more days (delay: {delay_days})")
                             return False
                     else:
                         # Shouldn't happen (all_watched implies last_watched exists)
@@ -508,7 +508,7 @@ class Televisarr:
                 if last_watched:
                     days_since = (datetime.now() - last_watched).days
                     if days_since >= days:
-                        logger.debug(f"Season {season_number} partially watched, last watch {days_since} days ago, eligible")
+                        logger.debug(f"Season {season_number} partially watched, last watch: {last_watched.strftime('%Y-%m-%d %H:%M:%S')} ({days_since} days ago), eligible")
                         return True
 
         return False
