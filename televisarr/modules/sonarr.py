@@ -307,7 +307,7 @@ class DSonarr:
                     logger.warning(f"Failed to unmonitor episodes: {e}")
 
             # Delete the series
-            self.instance.del_series(series_id, delete_files=delete_files, add_exclusion=add_exclusion)
+            self.instance.del_series(series_id, delete_files=delete_files)
             logger.info(f"Successfully deleted series '{series_title}'")
             return True
 

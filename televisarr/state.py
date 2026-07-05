@@ -492,6 +492,34 @@ class StateManager:
 
     # ========== Utility Methods ==========
 
+    def get_collection_name(self, library_name: str) -> Optional[str]:
+        """
+        Get the stored collection name for a library.
+    
+        Args:
+            library_name: Name of the Plex library
+        
+        Returns:
+            Stored collection name, or None if not found
+        """
+        state = self.load()
+        library_state = state.get("leaving_soon", {}).get(library_name, {})
+        return library_state.get("collection_name")
+
+    def set_collection_name(self, library_name: str, collection_name: str) -> None:
+        """
+        Store the collection name for a library.
+    
+        Args:
+            library_name: Name of the Plex library
+            collection_name: Collection name to store
+        """
+        state = self.load()
+        library_state = state.setdefault("leaving_soon", {}).setdefault(library_name, {})
+        library_state["collection_name"] = collection_name
+        self.save(state)
+        logger.debug(f"Stored collection name '{collection_name}' for library '{library_name}'")
+    
     def is_item_in_leaving_soon(
         self,
         library_name: str,

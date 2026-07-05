@@ -99,6 +99,31 @@ class Televisarr:
             plex_library = self.plex.get_library(library_name)
             library_section_id = self.plex.get_library_section_id(library_name)
 
+            # --- ADD THIS BLOCK ---
+            # Check if collection name changed and rename if needed
+            configured_name = library_config.leaving_soon.collection_name
+            stored_name = self.state_manager.get_collection_name(library_name)
+
+            if stored_name and stored_name != configured_name:
+                logger.info(f"Collection name changed from '{stored_name}' to '{configured_name}' - renaming...")
+                try:
+                    # Get the old collection
+                    old_collection = plex_library.collection(stored_name)
+                    # Rename it
+                    old_collection.edit(title=configured_name)
+                    logger.info(f"Successfully renamed collection from '{stored_name}' to '{configured_name}'")
+                    # Update state
+                    self.state_manager.set_collection_name(library_name, configured_name)
+                except Exception as e:
+                    logger.warning(f"Could not rename old collection '{stored_name}': {e}")
+                    # Store the new name anyway so we don't keep trying to rename
+                    self.state_manager.set_collection_name(library_name, configured_name)
+            elif not stored_name:
+                # First run — store the collection name
+                self.state_manager.set_collection_name(library_name, configured_name)
+                logger.debug(f"Stored initial collection name '{configured_name}' for library '{library_name}'")
+            # --- END ADDED BLOCK ---
+            
             # Get watch history
             watch_history = self.plex.get_watch_history(library_section_id)
             logger.debug(f"Got {len(watch_history)} watch history entries")
