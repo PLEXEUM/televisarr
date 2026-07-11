@@ -59,6 +59,16 @@ class Televisarr:
         self.libraries_processed = 0
         self.libraries_failed = 0
 
+        # Action tracking for summary
+        self.actions_taken = {
+            "deleted_seasons": [],
+            "tagged_seasons": [],
+            "saved_seasons": [],
+            "deleted_series": [],
+            "tagged_series": [],
+            "saved_series": [],
+        }
+
     def has_fatal_errors(self) -> bool:
         """Return True if all libraries failed due to configuration errors."""
         total_libraries = self.libraries_processed + self.libraries_failed
@@ -576,6 +586,7 @@ class Televisarr:
                             self.seasons_deleted += 1
                             self.state_manager.untag_season(library_name, series_id, season_number)
                             logger.info(f"Deleted season {season_number} of '{series_title}'")
+                            self.actions_taken["deleted_seasons"].append(f"{series_title} - Season {season_number}")
                         else:
                             logger.error(f"Failed to delete season {season_number} of '{series_title}'")
                     return
@@ -594,6 +605,7 @@ class Televisarr:
             # Add to state
             self.state_manager.tag_season(library_name, series_id, season_number)
             self.seasons_tagged += 1
+            self.actions_taken["tagged_seasons"].append(f"{series_title} - Season {season_number}") 
 
             # Add to Plex collection
             self._add_to_leaving_soon_collection(library_config, plex_library, show, season_number)
@@ -641,6 +653,7 @@ class Televisarr:
             # Remove from Plex collection
             self._remove_from_leaving_soon_collection(library_config, plex_library, show, season_number)
             self.seasons_saved += 1
+            self.actions_taken["saved_seasons"].append(f"{series_title} - Season {season_number}")
             logger.info(f"Saved season {season_number} of '{series_title}'")
 
     def _check_series_deletion_eligibility(
@@ -805,6 +818,7 @@ class Televisarr:
                         if success:
                             self.series_deleted += 1
                             self.state_manager.untag_series(library_name, series_id)
+                            self.actions_taken["deleted_series"].append(f"{series_title}") 
                             logger.info(f"Deleted series '{series_title}'")
                         else:
                             logger.error(f"Failed to delete series '{series_title}'")
@@ -823,6 +837,7 @@ class Televisarr:
             # Add to state
             self.state_manager.tag_series(library_name, series_id)
             self.series_tagged += 1
+            self.actions_taken["tagged_series"].append(f"{series_title}")
 
             # Add to Plex collection (all seasons)
             seasons = self.sonarr.get_seasons(series_id)
@@ -1241,6 +1256,178 @@ class Televisarr:
         except Exception as e:
             logger.debug(f"Failed to cleanup orphaned labels for library '{library_name}': {e}")
     
+    def _log_current_schedule(self) -> None:
+        """
+        Log the current schedule from the state file.
+        Shows total seasons and series currently in the grace period.
+        """
+        state = self.state_manager.load()
+        leaving_soon = state.get("leaving_soon", {})
+
+        total_tagged_seasons = 0
+        total_tagged_series = 0
+
+        for library_name, library_state in leaving_soon.items():
+            season_state = library_state.get("season", {})
+            series_state = library_state.get("series", {})
+
+            for series_id_str, seasons in season_state.items():
+                total_tagged_seasons += len(seasons)
+
+            total_tagged_series += len(series_state)
+
+        logger.info("-" * 40)
+        logger.info("CURRENT SCHEDULE (from state):")
+        logger.info(f"  Seasons scheduled:  {total_tagged_seasons}")
+        logger.info(f"  Series scheduled:   {total_tagged_series}")
+    
+    def _log_leaving_soon_status(self) -> None:
+        """
+        Log the current state of all items in the "TV Leaving Soon" collection.
+        Shows which seasons/series are pending deletion and how many days remain.
+        Sorted by urgency: NOW first, then most days remaining to least.
+        """
+        logger.info("-" * 40)
+        logger.info("TV LEAVING SOON STATUS:")
+
+        now = datetime.now()
+        state = self.state_manager.load()
+        leaving_soon = state.get("leaving_soon", {})
+
+        has_items = False
+
+        for library_name, library_state in leaving_soon.items():
+            season_state = library_state.get("season", {})
+            series_state = library_state.get("series", {})
+
+            if not season_state and not series_state:
+                continue
+
+            logger.info(f"  Library: {library_name}")
+            has_items = True
+
+            # Collect all items with their metadata
+            items = []
+
+            # Process seasons
+            for series_id_str, seasons in season_state.items():
+                series_id = int(series_id_str)
+                series = self.sonarr.get_series_by_id(series_id)
+                if not series:
+                    continue
+
+                series_title = series.get("title", "Unknown")
+
+                for season_num_str, data in seasons.items():
+                    season_num = int(season_num_str)
+                    tagged_at = data.get("tagged_at")
+                    if not tagged_at:
+                        continue
+
+                    try:
+                        tagged_date = datetime.fromisoformat(tagged_at)
+                        days_ago = (now - tagged_date).days
+
+                        # Get grace period from config
+                        grace_period = 7  # Default
+                        for lib_config in self.config.libraries:
+                            if lib_config.name == library_name:
+                                grace_period = lib_config.grace_period
+                                break
+
+                        days_remaining = max(0, grace_period - days_ago)
+
+                        # Determine status
+                        if days_remaining == 0:
+                            status = "NOW"
+                            status_display = "NOW"
+                        else:
+                            status_display = f"{days_remaining}d"
+
+                        items.append({
+                            "type": "season",
+                            "library": library_name,
+                            "series_title": series_title,
+                            "season_num": season_num,
+                            "days_remaining": days_remaining,
+                            "days_ago": days_ago,
+                            "grace_period": grace_period,
+                            "status_display": status_display,
+                            "tagged_at": tagged_at,
+                        })
+                    except (ValueError, TypeError):
+                        continue
+
+            # Process series
+            for series_id_str, data in series_state.items():
+                series_id = int(series_id_str)
+                series = self.sonarr.get_series_by_id(series_id)
+                if not series:
+                    continue
+
+                series_title = series.get("title", "Unknown")
+                tagged_at = data.get("tagged_at")
+                if not tagged_at:
+                    continue
+
+                try:
+                    tagged_date = datetime.fromisoformat(tagged_at)
+                    days_ago = (now - tagged_date).days
+
+                    # Get series grace period from config
+                    grace_period = 14  # Default
+                    for lib_config in self.config.libraries:
+                        if lib_config.name == library_name:
+                            grace_period = lib_config.series.grace_period
+                            break
+
+                    days_remaining = max(0, grace_period - days_ago)
+
+                    # Determine status
+                    if days_remaining == 0:
+                        status_display = "NOW"
+                    else:
+                        status_display = f"{days_remaining}d"
+
+                    items.append({
+                        "type": "series",
+                        "library": library_name,
+                        "series_title": series_title,
+                        "season_num": None,
+                        "days_remaining": days_remaining,
+                        "days_ago": days_ago,
+                        "grace_period": grace_period,
+                        "status_display": status_display,
+                        "tagged_at": tagged_at,
+                    })
+                except (ValueError, TypeError):
+                    continue
+
+            # Sort items: NOW first, then by days_remaining (ascending)
+            items.sort(key=lambda x: (0 if x["days_remaining"] == 0 else 1, x["days_remaining"]))
+
+            # Display items with fixed-width formatting
+            for item in items:
+                if item["type"] == "season":
+                    name = f"{item['series_title']} - Season {item['season_num']}"
+                else:
+                    name = item['series_title']
+
+                # Pad name to fixed width (45 characters)
+                name_padded = name.ljust(45)
+
+                if item["days_remaining"] == 0:
+                    status = "NOW"
+                    extra = f" (grace period: {item['grace_period']}d)"
+                else:
+                    status = f"{item['days_remaining']}d"
+                    extra = ""
+
+                logger.info(f"    {name_padded} {status}  | tagged {item['days_ago']}d ago{extra}")
+
+        if not has_items:
+            logger.info("  No items currently in TV Leaving Soon")
+    
     def _log_summary(self) -> None:
         """Log a summary of the run."""
         separator = "=" * 60
@@ -1256,12 +1443,65 @@ class Televisarr:
         if self.libraries_failed > 0:
             logger.info(f"Libraries failed: {self.libraries_failed}")
 
+        # ----- THIS RUN STATISTICS -----
         logger.info("-" * 40)
-        logger.info(f"Seasons tagged for deletion:  {self.seasons_tagged}")
-        logger.info(f"Seasons deleted:              {self.seasons_deleted}")
-        logger.info(f"Seasons saved:                {self.seasons_saved}")
-        logger.info(f"Series tagged for deletion:   {self.series_tagged}")
-        logger.info(f"Series deleted:               {self.series_deleted}")
-        logger.info(f"Series saved:                 {self.series_saved}")
+        logger.info("THIS RUN:")
+        logger.info(f"  Seasons tagged for deletion:  {self.seasons_tagged}")
+        logger.info(f"  Seasons deleted:              {self.seasons_deleted}")
+        logger.info(f"  Seasons saved:                {self.seasons_saved}")
+        logger.info(f"  Series tagged for deletion:   {self.series_tagged}")
+        logger.info(f"  Series deleted:               {self.series_deleted}")
+        logger.info(f"  Series saved:                 {self.series_saved}")
+
+        # ----- CURRENT SCHEDULE (from State) -----
+        self._log_current_schedule()
+
+        # ----- TV LEAVING SOON STATUS (detailed) -----
+        self._log_leaving_soon_status()
+
+        # ----- ACTIONS TAKEN (detailed) -----
+        logger.info("-" * 40)
+        logger.info("ACTIONS TAKEN:")
+
+        has_actions = False
+
+        if self.actions_taken["deleted_seasons"]:
+            has_actions = True
+            logger.info("  DELETED SEASONS:")
+            for action in self.actions_taken["deleted_seasons"]:
+                logger.info(f"    - {action}")
+
+        if self.actions_taken["tagged_seasons"]:
+            has_actions = True
+            logger.info("  TAGGED FOR DELETION:")
+            for action in self.actions_taken["tagged_seasons"]:
+                logger.info(f"    - {action}")
+
+        if self.actions_taken["saved_seasons"]:
+            has_actions = True
+            logger.info("  SAVED FROM DELETION:")
+            for action in self.actions_taken["saved_seasons"]:
+                logger.info(f"    - {action}")
+
+        if self.actions_taken["deleted_series"]:
+            has_actions = True
+            logger.info("  DELETED SERIES:")
+            for action in self.actions_taken["deleted_series"]:
+                logger.info(f"    - {action}")
+
+        if self.actions_taken["tagged_series"]:
+            has_actions = True
+            logger.info("  TAGGED FOR DELETION:")
+            for action in self.actions_taken["tagged_series"]:
+                logger.info(f"    - {action}")
+
+        if self.actions_taken["saved_series"]:
+            has_actions = True
+            logger.info("  SAVED FROM DELETION:")
+            for action in self.actions_taken["saved_series"]:
+                logger.info(f"    - {action}")
+
+        if not has_actions:
+            logger.info("  No actions were taken during this run")
 
         logger.info(separator)

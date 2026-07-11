@@ -56,14 +56,41 @@ class StateManager:
         """Load state from file, return empty state if missing or corrupt."""
         try:
             with open(self._state_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                content = f.read()
+            
+                # Check for null bytes (indicates corruption from incomplete writes)
+                if '\x00' in content:
+                    logger.warning(f"State file '{self._state_file}' contains null bytes - corrupt, starting fresh")
+                    # Rename corrupt file for debugging
+                    try:
+                        corrupt_backup = f"{self._state_file}.corrupt"
+                        import shutil
+                        shutil.copy2(self._state_file, corrupt_backup)
+                        logger.debug(f"Corrupt state file backed up to '{corrupt_backup}'")
+                    except Exception:
+                        pass
+                    return self._empty_state()
+            
+                data = json.loads(content)
+            
             if not isinstance(data, dict) or data.get("version") != STATE_VERSION:
                 logger.warning("State file has unexpected format or version, starting fresh")
                 return self._empty_state()
             return data
         except FileNotFoundError:
             return self._empty_state()
-        except (json.JSONDecodeError, OSError) as e:
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse state file '{self._state_file}': {e}. Starting fresh.")
+            # Try to back up corrupt file for debugging
+            try:
+                corrupt_backup = f"{self._state_file}.corrupt"
+                import shutil
+                shutil.copy2(self._state_file, corrupt_backup)
+                logger.debug(f"Corrupt state file backed up to '{corrupt_backup}'")
+            except Exception:
+                pass
+            return self._empty_state()
+        except OSError as e:
             logger.warning(f"Failed to read state file '{self._state_file}': {e}. Starting fresh.")
             return self._empty_state()
 
@@ -77,6 +104,8 @@ class StateManager:
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())  # Ensure data is written to disk
                 os.replace(tmp_path, self._state_file)
             except Exception:
                 # Clean up temp file on failure
