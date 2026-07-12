@@ -473,24 +473,69 @@ class PlexMediaServer:
             try:
                 results = library.search(guid=f"tvdb://{tvdb_id}")
                 if results:
+                    # Filter to only return show items (not episodes)
+                    for item in results:
+                        if hasattr(item, 'type') and item.type == 'show':
+                            return item
+                        # If it's a season, try to get the parent show
+                        if hasattr(item, 'type') and item.type == 'season':
+                            try:
+                                return item.parent
+                            except Exception:
+                                pass
+                    # If we got results but none were shows, return the first result
                     return results[0]
             except Exception:
                 pass
 
-        # Try title search
+        # TITLE FALLBACK: Try searching by title if TVDB failed
         if title:
             try:
-                results = library.search(title=title)
-                for item in results:
-                    # Check if it's a show (not episode/movie)
-                    if hasattr(item, 'seasonNumber'):
-                        continue  # Skip episodes
-                    if year and item.year and abs(item.year - year) <= 2:
-                        return item
-                    elif not year:
-                        return item
+                # Search for shows only (libtype='show')
+                results = library.search(title=title, libtype='show')
+        
+                if results:
+                    # Try to match by year first
+                    if year:
+                        for item in results:
+                            # Check if year matches (within 2 years)
+                            if hasattr(item, 'year') and item.year:
+                                if abs(item.year - year) <= 2:
+                                    logger.debug(f"Found show by title+year: '{item.title}' ({item.year})")
+                                    return item
+                
+                    # If no year match or no year provided, return the first result
+                    logger.debug(f"Found show by title fallback: '{results[0].title}'")
+                    return results[0]
+                
             except Exception as e:
-                logger.debug(f"Error searching for show '{title}': {e}")
+                logger.debug(f"Title fallback search failed for '{title}': {e}")
+
+        # NORMALIZED TITLE FALLBACK: Try searching with normalized title
+        if title:
+            try:
+                normalized_title = normalize_title(title)
+            
+                # Search all shows and filter manually
+                all_shows = library.search(libtype='show')
+                for item in all_shows:
+                    item_title = getattr(item, 'title', '')
+                    if not item_title:
+                        continue
+                    normalized_item = normalize_title(item_title)
+                
+                    # Exact normalized match
+                    if normalized_item == normalized_title:
+                        logger.debug(f"Found show by normalized title fallback: '{item.title}'")
+                        return item
+                
+                    # Check if one title is contained in the other (handles extra year/remake info)
+                    if normalized_title in normalized_item or normalized_item in normalized_title:
+                        logger.debug(f"Found show by partial normalized title fallback: '{item.title}'")
+                        return item
+                    
+            except Exception as e:
+                logger.debug(f"Normalized title fallback search failed for '{title}': {e}")        
 
         return None
 
