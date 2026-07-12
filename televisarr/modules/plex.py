@@ -495,17 +495,42 @@ class PlexMediaServer:
                 results = library.search(title=title, libtype='show')
         
                 if results:
-                    # Try to match by year first
+                    # First try exact title match (case-insensitive)
+                    for item in results:
+                        if hasattr(item, 'title') and item.title.lower() == title.lower():
+                            logger.debug(f"Found show by exact title: '{item.title}'")
+                            return item
+                
+                    # Then try STARTS WITH match (prevents "Survivor" matching "Australian Survivor")
+                    for item in results:
+                        if hasattr(item, 'title'):
+                            item_title_lower = item.title.lower()
+                            title_lower = title.lower()
+                            # Check if the title starts with the search title
+                            # e.g., "Australian Survivor" starts with "Australian", not "Survivor"
+                            if item_title_lower.startswith(title_lower):
+                                logger.debug(f"Found show by starts with match: '{item.title}' (from '{title}')")
+                                return item
+                
+                    # Then try to match by year
                     if year:
                         for item in results:
-                            # Check if year matches (within 2 years)
                             if hasattr(item, 'year') and item.year:
                                 if abs(item.year - year) <= 2:
-                                    logger.debug(f"Found show by title+year: '{item.title}' ({item.year})")
-                                    return item
+                                    # Check if this is the correct show by title and year
+                                    if hasattr(item, 'title') and item.title.lower() == title.lower():
+                                        logger.debug(f"Found show by exact title+year: '{item.title}' ({item.year})")
+                                        return item
+                                
+                                    # Only use if title starts with
+                                    item_title_lower = item.title.lower()
+                                    title_lower = title.lower()
+                                    if item_title_lower.startswith(title_lower):
+                                        logger.debug(f"Found show by starts with+year: '{item.title}' ({item.year})")
+                                        return item
                 
-                    # If no year match or no year provided, return the first result
-                    logger.debug(f"Found show by title fallback: '{results[0].title}'")
+                    # If no matches, return the first result as fallback
+                    logger.debug(f"Found show by title fallback (fallback): '{results[0].title}'")
                     return results[0]
                 
             except Exception as e:
@@ -515,7 +540,7 @@ class PlexMediaServer:
         if title:
             try:
                 normalized_title = normalize_title(title)
-            
+        
                 # Search all shows and filter manually
                 all_shows = library.search(libtype='show')
                 for item in all_shows:
@@ -523,17 +548,17 @@ class PlexMediaServer:
                     if not item_title:
                         continue
                     normalized_item = normalize_title(item_title)
-                
+            
                     # Exact normalized match
                     if normalized_item == normalized_title:
                         logger.debug(f"Found show by normalized title fallback: '{item.title}'")
                         return item
-                
-                    # Check if one title is contained in the other (handles extra year/remake info)
-                    if normalized_title in normalized_item or normalized_item in normalized_title:
-                        logger.debug(f"Found show by partial normalized title fallback: '{item.title}'")
+            
+                    # Check if normalized title starts with the search title
+                    if normalized_item.startswith(normalized_title):
+                        logger.debug(f"Found show by normalized starts with fallback: '{item.title}'")
                         return item
-                    
+                
             except Exception as e:
                 logger.debug(f"Normalized title fallback search failed for '{title}': {e}")        
 
