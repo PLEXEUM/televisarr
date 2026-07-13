@@ -477,7 +477,7 @@ class PlexMediaServer:
             except Exception:
                 pass
 
-        # Try title search
+        # Try title search - EXACT MATCH ONLY
         if title:
             try:
                 results = library.search(title=title)
@@ -485,8 +485,10 @@ class PlexMediaServer:
                     # Check if it's a show (not episode/movie)
                     if hasattr(item, 'type') and item.type != 'show':
                         continue
-                    # Title matches - return the show regardless of year
-                    return item
+                    # EXACT title match required (case-insensitive)
+                    if hasattr(item, 'title') and item.title.lower() == title.lower():
+                        logger.debug(f"Found show by exact title: '{item.title}'")
+                        return item
             except Exception as e:
                 logger.debug(f"Error searching for show '{title}': {e}")
 
