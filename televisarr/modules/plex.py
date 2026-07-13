@@ -490,8 +490,8 @@ class PlexMediaServer:
                         return item
                     elif not year:
                         return item
-                except Exception as e:
-                    logger.debug(f"Error searching for show '{title}': {e}")
+            except Exception as e:
+                logger.debug(f"Error searching for show '{title}': {e}")
 
         return None
 
