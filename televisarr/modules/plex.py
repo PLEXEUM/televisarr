@@ -485,11 +485,8 @@ class PlexMediaServer:
                     # Check if it's a show (not episode/movie)
                     if hasattr(item, 'type') and item.type != 'show':
                         continue
-                    # Check year if provided
-                    if year and item.year and abs(item.year - year) <= 2:
-                        return item
-                    elif not year:
-                        return item
+                    # Title matches - return the show regardless of year
+                    return item
             except Exception as e:
                 logger.debug(f"Error searching for show '{title}': {e}")
 
