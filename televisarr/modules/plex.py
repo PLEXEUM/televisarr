@@ -477,20 +477,22 @@ class PlexMediaServer:
             except Exception:
                 pass
 
-        # Try title search - EXACT MATCH ONLY
+        # Try title search
         if title:
             try:
                 results = library.search(title=title)
                 for item in results:
                     # Check if it's a show (not episode/movie)
+                    if hasattr(item, 'type') and item.type != 'show':
+                        continue
+                    # Skip episodes
                     if hasattr(item, 'seasonNumber'):
-                        continue  # Skip episodes
-                    # EXACT title match required
-                    if hasattr(item, 'title') and item.title.lower() == title.lower():
-                        if year and item.year and abs(item.year - year) <= 2:
-                            return item
-                        elif not year:
-                            return item
+                        continue
+                    # Check year if provided
+                    if year and item.year and abs(item.year - year) <= 2:
+                        return item
+                    elif not year:
+                        return item
             except Exception as e:
                 logger.debug(f"Error searching for show '{title}': {e}")
 
