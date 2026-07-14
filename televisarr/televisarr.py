@@ -308,6 +308,11 @@ class Televisarr:
         # If series is eligible for deletion, tag/delete it
         if series_eligible_for_deletion:
             self._handle_series_deletion(library_config, series, show, plex_library)
+        else:
+            # If the series is in state but no longer eligible, remove it
+            if self.state_manager.is_item_in_leaving_soon(library_config.name, series_id):
+                self.state_manager.untag_series(library_config.name, series_id)
+                logger.debug(f"Removed series '{series_title}' from state (no longer eligible)")
 
     def _process_season(
         self,
@@ -365,8 +370,14 @@ class Televisarr:
 
         if is_eligible:
             self._handle_season_deletion(library_config, series, season_number, show, plex_library)
+        else:
+            # If the season is in state but no longer eligible, remove it
+            if self.state_manager.is_item_in_leaving_soon(library_config.name, series_id, season_number):
+                self._remove_from_leaving_soon_collection(library_config, plex_library, show, season_number)
+                self.state_manager.untag_season(library_config.name, series_id, season_number)
+                logger.debug(f"Removed season {season_number} of '{series_title}' from state (no longer eligible)")
 
-
+    
     def _check_season_deletion_eligibility(
         self,
         library_config: LibraryConfig,
