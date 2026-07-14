@@ -97,7 +97,7 @@ libraries:
         # watch_users: ["user1", "user2"] - only specific users count
         watch_users: "any"
         # days: 0 - delete immediately when fully watched
-        # days: 30 - wait 30 days after fully watched before deletion
+        # days: 30 - wait 30 days after the last episode was watched before deletion
         days: 0
       
       # Rule 2: Delete seasons with no watch activity
@@ -138,24 +138,12 @@ libraries:
       grace_period: 14          # Longer grace period for entire series
     
     # =========================================================================
-    # PROTECTION SETTINGS
-    # =========================================================================
-    #
-    # If someone re-watches an episode in a season that's in "TV Leaving Soon":
-    #   - The entire season is removed from the collection
-    #   - The season is protected for save_days days
-    #   - After save_days with no new watches, it can be re-added
-    #
-    protection:
-      enabled: true
-      save_days: 14             # Days to protect after a re-watch
-    
-    # =========================================================================
     # TV LEAVING SOON COLLECTION
     # =========================================================================
     #
     # Single Plex collection that shows all seasons and series scheduled for deletion.
-    # Items appear here when tagged, and are removed when saved or deleted.
+    # Items appear here when tagged, and are removed when deleted or when 
+    # they are no longer eligible (e.g., due to a re-watch resetting the timer).
     #
     leaving_soon:
       collection_name: "TV Leaving Soon"
@@ -183,9 +171,6 @@ libraries:
   #     require_ended: true
   #     watch_users: "any"
   #     grace_period: 30
-  #   protection:
-  #     enabled: true
-  #     save_days: 30
   #   leaving_soon:
   #     collection_name: "TV Leaving Soon"
   #     description: "These seasons/series will be deleted soon - watch to save them!"

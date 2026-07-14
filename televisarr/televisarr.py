@@ -54,8 +54,6 @@ class Televisarr:
         self.series_deleted = 0
         self.seasons_tagged = 0
         self.series_tagged = 0
-        self.seasons_saved = 0
-        self.series_saved = 0
         self.libraries_processed = 0
         self.libraries_failed = 0
 
@@ -63,10 +61,8 @@ class Televisarr:
         self.actions_taken = {
             "deleted_seasons": [],
             "tagged_seasons": [],
-            "saved_seasons": [],
             "deleted_series": [],
             "tagged_series": [],
-            "saved_series": [],
         }
 
     def has_fatal_errors(self) -> bool:
@@ -307,7 +303,6 @@ class Televisarr:
                 watch_history,
                 show,
                 plex_library,
-                series_eligible_for_deletion
             )
 
         # If series is eligible for deletion, tag/delete it
@@ -321,8 +316,7 @@ class Televisarr:
         season_number: int,
         watch_history: Dict[str, Dict],
         show: Any,
-        plex_library: Any,
-        series_eligible_for_deletion: bool
+        plex_library: Any
     ) -> None:
         """
         Process a single season.
@@ -371,11 +365,7 @@ class Televisarr:
 
         if is_eligible:
             self._handle_season_deletion(library_config, series, season_number, show, plex_library)
-        elif self.state_manager.is_item_in_leaving_soon(
-            library_config.name, series_id, season_number
-        ):
-            # Season was previously tagged but no longer eligible - save it
-            self._save_season(library_config, series, season_number, show, plex_library)
+
 
     def _check_season_deletion_eligibility(
         self,
@@ -396,11 +386,6 @@ class Televisarr:
            OR have a season finale flag (finaleType == "season")
            (ONLY for fully watched seasons - prevents deletion during hiatuses)
         """
-
-        # Check if season is currently protected (from state manager)
-        if self.state_manager.is_season_protected(library_config.name, series_id, season_number):
-            logger.debug(f"Season {season_number} is protected, skipping")
-            return False
 
         total_episodes = season_watch_status["total_episodes"]
         watched_episodes = season_watch_status["watched_episodes"]
@@ -433,7 +418,7 @@ class Televisarr:
             if not is_series_ended and not is_season_complete and not has_season_finale:
                 logger.debug(
                     f"Season {season_number} of '{series.get('title', 'Unknown')}' is fully watched but "
-                    f"series is continuing, season is incomplete, and no season finale - PROTECTED from deletion"
+                    f"series is continuing, season is incomplete, and no season finale - SKIPPING (preventing hiatus deletion)"
                 )
                 return False
 
@@ -611,50 +596,6 @@ class Televisarr:
             self._add_to_leaving_soon_collection(library_config, plex_library, show, season_number)
             logger.info(f"Tagged season {season_number} of '{series_title}' for deletion")
 
-    def _save_season(
-        self,
-        library_config: LibraryConfig,
-        series: Dict[str, Any],
-        season_number: int,
-        show: Any,
-        plex_library: Any
-    ) -> None:
-        """
-        Save a season from deletion (remove from TV Leaving Soon).
-
-        Args:
-            library_config: Library configuration
-            series: Series data from Sonarr
-            season_number: Season number
-            show: Plex show item
-            plex_library: Plex library section
-        """
-        library_name = library_config.name
-        series_id = series["id"]
-        series_title = series.get("title", "Unknown")
-
-        logger.info(f"Season {season_number} of '{series_title}' is no longer eligible for deletion - saving")
-
-        if self.is_dry_run:
-            logger.info(f"[DRY-RUN] Would save season {season_number} of '{series_title}'")
-        else:
-            # Remove from state
-            self.state_manager.untag_season(library_name, series_id, season_number)
-
-            # Protect it for a period
-            if library_config.protection.enabled:
-                self.state_manager.protect_season(
-                    library_name,
-                    series_id,
-                    season_number,
-                    library_config.protection.save_days
-                )
-
-            # Remove from Plex collection
-            self._remove_from_leaving_soon_collection(library_config, plex_library, show, season_number)
-            self.seasons_saved += 1
-            self.actions_taken["saved_seasons"].append(f"{series_title} - Season {season_number}")
-            logger.info(f"Saved season {season_number} of '{series_title}'")
 
     def _check_series_deletion_eligibility(
         self,
@@ -1448,10 +1389,8 @@ class Televisarr:
         logger.info("THIS RUN:")
         logger.info(f"  Seasons tagged for deletion:  {self.seasons_tagged}")
         logger.info(f"  Seasons deleted:              {self.seasons_deleted}")
-        logger.info(f"  Seasons saved:                {self.seasons_saved}")
         logger.info(f"  Series tagged for deletion:   {self.series_tagged}")
         logger.info(f"  Series deleted:               {self.series_deleted}")
-        logger.info(f"  Series saved:                 {self.series_saved}")
 
         # ----- CURRENT SCHEDULE (from State) -----
         self._log_current_schedule()
@@ -1477,12 +1416,6 @@ class Televisarr:
             for action in self.actions_taken["tagged_seasons"]:
                 logger.info(f"    - {action}")
 
-        if self.actions_taken["saved_seasons"]:
-            has_actions = True
-            logger.info("  SAVED FROM DELETION:")
-            for action in self.actions_taken["saved_seasons"]:
-                logger.info(f"    - {action}")
-
         if self.actions_taken["deleted_series"]:
             has_actions = True
             logger.info("  DELETED SERIES:")
@@ -1493,12 +1426,6 @@ class Televisarr:
             has_actions = True
             logger.info("  TAGGED FOR DELETION:")
             for action in self.actions_taken["tagged_series"]:
-                logger.info(f"    - {action}")
-
-        if self.actions_taken["saved_series"]:
-            has_actions = True
-            logger.info("  SAVED FROM DELETION:")
-            for action in self.actions_taken["saved_series"]:
                 logger.info(f"    - {action}")
 
         if not has_actions:

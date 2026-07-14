@@ -74,7 +74,7 @@ class SeasonConfig(BaseModel):
 
     fully_watched: dict = Field(
         default_factory=lambda: {"enabled": True, "watch_users": "any", "days": 0},
-        description="Delete seasons where all episodes are fully watched. watch_users: 'any', 'all', or list of usernames. days: 0=immediate, or number of days to wait after fully watched",
+        description="Delete seasons where all episodes are fully watched. watch_users: 'any', 'all', or list of usernames. days: 0=immediate, or number of days after the last episode was watched before deletion",
         json_schema_extra={"example": {"enabled": True, "watch_users": "any", "days": 30}},
     )
     no_activity: dict = Field(
@@ -110,19 +110,6 @@ class SeriesConfig(BaseModel):
         ge=1,
     )
 
-
-class ProtectionConfig(BaseModel):
-    """Protection settings for re-watched content."""
-
-    enabled: bool = Field(
-        default=True,
-        description="Enable protection for re-watched content",
-    )
-    save_days: int = Field(
-        default=14,
-        description="Days to keep season protected after a re-watch",
-        ge=1,
-    )
 
 # In schema.py, update LeavingSoonConfig
 
@@ -176,10 +163,6 @@ class LibraryConfig(BaseModel):
     series: SeriesConfig = Field(
         default_factory=SeriesConfig,
         description="Series-level deletion rules",
-    )
-    protection: ProtectionConfig = Field(
-        default_factory=ProtectionConfig,
-        description="Protection settings for re-watched content",
     )
     leaving_soon: LeavingSoonConfig = Field(
         default_factory=LeavingSoonConfig,

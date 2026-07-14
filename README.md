@@ -11,7 +11,7 @@ Televisarr monitors your Plex watch history and Sonarr library, automatically mo
 - **Season-Level Deletion** - Fully watched seasons are marked for deletion
 - **Series-Level Deletion** - When ALL seasons are watched AND the series has ended, the entire series is removed
 - **No Activity Deletion** - Optionally delete seasons with no watch activity for X days
-- **Protection** - If someone re-watches an episode, the season is saved for X days
+- **Re-Watch Behavior** - Watching any episode resets the deletion timer automatically
 - **TV Leaving Soon Collection** - Single Plex collection showing what's scheduled for deletion
 - **Built-in Scheduler** - Runs on a schedule automatically (daily, weekly, or custom cron)
 - **Dry Run Mode** - Preview what would be deleted before enabling real deletions
@@ -69,9 +69,6 @@ libraries:
       enabled: true
       require_ended: true
       grace_period: 14
-    protection:
-      enabled: true
-      save_days: 14
     leaving_soon:
       collection_name: "TV Leaving Soon"
 
@@ -92,7 +89,7 @@ dry_run: true
 
 A season is marked for deletion when:
 
-- All episodes are fully watched (based on `watch_users` rule)
+- All episodes are fully watched AND the configured delay (in days) has passed since the last episode was watched (based on `watch_users` rule)
 - **OR** No episodes have been watched in X days (if `no_activity` enabled)
 - **AND** The series has ended/cancelled **OR** the season is complete in Sonarr
 
@@ -104,14 +101,15 @@ A series is marked for deletion when:
 
 - ALL seasons are fully watched
 - **AND** The series status in Sonarr is "ended" or "cancelled"
+- **AND** The configured delay has passed since the last episode was watched across all seasons
 
-### Protection
+### Re-Watch Behavior
 
 If someone re-watches an episode in a season that's in "TV Leaving Soon":
 
 - The entire season is removed from the collection
-- The season is protected for X days (configurable)
-- After X days with no new watches, it can be re-added
+- The season's last watched date updates, resetting the deletion timer
+- The season will only be re-added after the configured number of days have passed since the last watch
 
 ---
 

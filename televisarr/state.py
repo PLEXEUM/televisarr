@@ -4,7 +4,6 @@ State management for Televisarr.
 Tracks items in the "TV Leaving Soon" collection to enable:
 - Two-phase deletion (tag first, delete later)
 - Grace period tracking
-- Protection tracking (re-watched items)
 - Determining which seasons/series are newly tagged vs. already in collection
 """
 
@@ -33,14 +32,12 @@ class StateManager:
                     "series_id_1": {
                         "1": {  # season number
                             "tagged_at": "2026-03-01T13:27:49",
-                            "protection_until": null
                         }
                     }
                 },
                 "series": {
                     "series_id_1": {
                         "tagged_at": "2026-03-01T13:27:49",
-                        "protection_until": null
                     }
                 }
             }
@@ -134,7 +131,7 @@ class StateManager:
             season_number: Season number
 
         Returns:
-            Dict with tagged_at and protection_until, or None if not found
+            Dict with tagged_at, or None if not found
         """
         state = self.load()
         library_state = state.get("leaving_soon", {}).get(library_name, {})
@@ -161,7 +158,6 @@ class StateManager:
         library_name: str,
         series_id: int,
         season_number: int,
-        protection_until: Optional[datetime] = None
     ) -> None:
         """
         Tag a season as "leaving soon".
@@ -170,7 +166,6 @@ class StateManager:
             library_name: Name of the Plex library
             series_id: Sonarr series ID
             season_number: Season number
-            protection_until: Optional protection expiry date
         """
         state = self.load()
         library_state = state.setdefault("leaving_soon", {}).setdefault(library_name, {})
@@ -181,7 +176,6 @@ class StateManager:
         if str(season_number) not in series_state:
             series_state[str(season_number)] = {
                 "tagged_at": datetime.now().isoformat(),
-                "protection_until": protection_until.isoformat() if protection_until else None,
             }
             self.save(state)
             logger.debug(f"Tagged season {season_number} for series {series_id} in library '{library_name}'")
@@ -216,74 +210,6 @@ class StateManager:
                 del state["leaving_soon"][library_name]
             self.save(state)
             logger.debug(f"Untagged season {season_number} for series {series_id} in library '{library_name}'")
-
-    def protect_season(
-        self,
-        library_name: str,
-        series_id: int,
-        season_number: int,
-        save_days: int
-    ) -> None:
-        """
-        Protect a season from being re-tagged for a period of time.
-
-        Args:
-            library_name: Name of the Plex library
-            series_id: Sonarr series ID
-            season_number: Season number
-            save_days: Number of days to protect for
-        """
-        state = self.load()
-        library_state = state.setdefault("leaving_soon", {}).setdefault(library_name, {})
-        season_state = library_state.setdefault("season", {})
-        series_state = season_state.setdefault(str(series_id), {})
-
-        protection_until = datetime.now() + timedelta(days=save_days)
-
-        if str(season_number) in series_state:
-            series_state[str(season_number)]["protection_until"] = protection_until.isoformat()
-        else:
-            # Season might not be tagged yet, but we still track protection
-            series_state[str(season_number)] = {
-                "tagged_at": None,
-                "protection_until": protection_until.isoformat(),
-            }
-
-        self.save(state)
-        logger.debug(
-            f"Season {season_number} for series {series_id} protected until {protection_until.isoformat()}"
-        )
-
-    def is_season_protected(
-        self,
-        library_name: str,
-        series_id: int,
-        season_number: int
-    ) -> bool:
-        """
-        Check if a season is currently protected.
-
-        Args:
-            library_name: Name of the Plex library
-            series_id: Sonarr series ID
-            season_number: Season number
-
-        Returns:
-            True if the season is protected, False otherwise
-        """
-        season_state = self.get_season_state(library_name, series_id, season_number)
-        if not season_state:
-            return False
-
-        protection_until = season_state.get("protection_until")
-        if not protection_until:
-            return False
-
-        try:
-            protection_date = datetime.fromisoformat(protection_until)
-            return datetime.now() < protection_date
-        except (ValueError, TypeError):
-            return False
 
     def get_season_tagged_at(
         self,
@@ -359,7 +285,7 @@ class StateManager:
             series_id: Sonarr series ID
 
         Returns:
-            Dict with tagged_at and protection_until, or None if not found
+            Dict with tagged_at, or None if not found
         """
         state = self.load()
         library_state = state.get("leaving_soon", {}).get(library_name, {})
