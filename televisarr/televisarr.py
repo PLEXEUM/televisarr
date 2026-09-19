@@ -150,6 +150,9 @@ class Televisarr:
                 active_series_ids,
                 active_seasons
             )
+
+            # Clean up state entries for seasons that no longer exist in Sonarr
+            self._cleanup_stale_season_state(library_name, all_series)
             
             # Clean up orphaned labels
             self._cleanup_orphaned_labels(library_config, plex_library)
@@ -183,6 +186,136 @@ class Televisarr:
                     seasons.add(season_num)
             active_seasons[series_id] = seasons
         return active_seasons
+
+    def _cleanup_stale_season_state(
+        self,
+        library_name: str,
+        all_series: List[Dict]
+    ) -> None:
+        """
+        Remove state entries for seasons that no longer exist in Sonarr.
+
+        This handles the case where a season was tagged for deletion, but was
+        then manually deleted (or removed) from Sonarr before the grace period
+        ended. Without this, the season would remain stuck in state forever,
+        showing "NOW" in the leaving soon status but never actually being deleted.
+
+        Also removes the season from the Plex "TV Leaving Soon" collection and
+        strips any configured label, so Plex stays in sync with state.
+
+        Args:
+            library_name: Name of the Plex library
+            all_series: List of series data from Sonarr
+        """
+        # Build a map of series_id -> set of season numbers that exist in Sonarr
+        sonarr_seasons_by_series = {}
+        for series in all_series:
+            series_id = series["id"]
+            seasons = set()
+            for season in series.get("seasons", []):
+                season_num = season.get("seasonNumber")
+                if season_num is not None:
+                    seasons.add(season_num)
+            sonarr_seasons_by_series[series_id] = seasons
+
+        # Get all tagged seasons for this library
+        tagged_seasons = self.state_manager.get_all_tagged_seasons(library_name)
+
+        # Check if there is anything to clean up before fetching Plex library
+        has_stale = False
+        for series_id_str, seasons in tagged_seasons.items():
+            try:
+                series_id = int(series_id_str)
+            except (ValueError, TypeError):
+                continue
+            if series_id not in sonarr_seasons_by_series:
+                continue
+            sonarr_seasons = sonarr_seasons_by_series[series_id]
+            for season_num_str in seasons.keys():
+                try:
+                    season_num = int(season_num_str)
+                except (ValueError, TypeError):
+                    continue
+                if season_num not in sonarr_seasons:
+                    has_stale = True
+                    break
+            if has_stale:
+                break
+
+        if not has_stale:
+            return
+
+        # Look up the Plex library and library config once (only if needed)
+        try:
+            plex_library = self.plex.get_library(library_name)
+        except Exception as e:
+            logger.debug(f"Could not get Plex library '{library_name}' for stale season cleanup: {e}")
+            plex_library = None
+
+        lib_config = None
+        for lc in self.config.libraries:
+            if lc.name == library_name:
+                lib_config = lc
+                break
+
+        # Now actually clean up
+        for series_id_str, seasons in tagged_seasons.items():
+            try:
+                series_id = int(series_id_str)
+            except (ValueError, TypeError):
+                continue
+
+            # If the series no longer exists in Sonarr at all, skip - handled by
+            # cleanup_stale_entries already
+            if series_id not in sonarr_seasons_by_series:
+                continue
+
+            sonarr_seasons = sonarr_seasons_by_series[series_id]
+
+            for season_num_str in list(seasons.keys()):
+                try:
+                    season_num = int(season_num_str)
+                except (ValueError, TypeError):
+                    continue
+
+                if season_num not in sonarr_seasons:
+                    logger.info(
+                        f"Season {season_num} of series {series_id} no longer exists in Sonarr - "
+                        f"removing from state (stale entry)"
+                    )
+                    self.state_manager.untag_season(library_name, series_id, season_num)
+
+                    # Also clean up Plex collection / label for this season
+                    if plex_library and lib_config:
+                        try:
+                            series = self.sonarr.get_series_by_id(series_id)
+                            if not series:
+                                continue
+
+                            show = self.plex.find_show(
+                                plex_library,
+                                series.get("title", ""),
+                                series.get("year"),
+                                series.get("tvdbId"),
+                            )
+                            if not show:
+                                logger.debug(
+                                    f"Show for series {series_id} not found in Plex - "
+                                    f"skipping Plex cleanup for stale season {season_num}"
+                                )
+                                continue
+
+                            self._remove_from_leaving_soon_collection(
+                                lib_config, plex_library, show, season_num
+                            )
+                            logger.debug(
+                                f"Removed stale season {season_num} of '{series.get('title', 'Unknown')}' "
+                                f"from Plex collection/labels"
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to remove stale season {season_num} from Plex: {e}"
+                            )
 
     def _process_series(
         self,
@@ -570,6 +703,7 @@ class Televisarr:
                 # (e.g., from a previous buggy run)
                 self._ensure_in_leaving_soon_collection(library_config, plex_library, show, season_number)
 
+
                 if days_since_tagged >= grace_period:
                     # Delete the season
                     logger.info(f"Season {season_number} of '{series_title}' has been in TV Leaving Soon for {days_since_tagged} days (grace period: {grace_period})")
@@ -577,6 +711,20 @@ class Televisarr:
                     if self.is_dry_run:
                         logger.info(f"[DRY-RUN] Would delete season {season_number} of '{series_title}'")
                     else:
+                        # Check if the season still exists in Sonarr before trying to delete
+                        season_in_sonarr = self.sonarr.get_season_by_number(series_id, season_number)
+                        if season_in_sonarr is None:
+                            logger.info(
+                                f"Season {season_number} of '{series_title}' no longer exists in Sonarr - "
+                                f"removing from state (stale entry)"
+                            )
+                            self.state_manager.untag_season(library_name, series_id, season_number)
+                            if show:
+                                self._remove_from_leaving_soon_collection(
+                                    library_config, plex_library, show, season_number
+                                )
+                            return
+
                         success = self.sonarr.delete_season(series_id, season_number, delete_files=True)
                         if success:
                             self.seasons_deleted += 1
@@ -585,7 +733,20 @@ class Televisarr:
                             self.actions_taken["deleted_seasons"].append(f"{series_title} - Season {season_number}")
                         else:
                             logger.error(f"Failed to delete season {season_number} of '{series_title}'")
+                            # If deletion failed, double-check whether the season still exists.
+                            # If it's gone, clean up the state entry so we don't get stuck.
+                            if self.sonarr.get_season_by_number(series_id, season_number) is None:
+                                logger.info(
+                                    f"Season {season_number} of '{series_title}' no longer exists in Sonarr - "
+                                    f"removing from state after failed deletion"
+                                )
+                                self.state_manager.untag_season(library_name, series_id, season_number)
+                                if show:
+                                    self._remove_from_leaving_soon_collection(
+                                        library_config, plex_library, show, season_number
+                                    )
                     return
+
                 else:
                     # Still in grace period
                     days_remaining = grace_period - days_since_tagged
