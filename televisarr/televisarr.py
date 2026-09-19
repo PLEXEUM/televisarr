@@ -392,6 +392,14 @@ class Televisarr:
 
                 if is_eligible:
                     self._handle_season_deletion(library_config, series, season_number, None, plex_library)
+                else:
+                    # Season is in state but no longer eligible - untag it
+                    if self.state_manager.is_item_in_leaving_soon(library_config.name, series_id, season_number):
+                        logger.info(
+                            f"Season {season_number} of '{series_title}' is no longer eligible for deletion - "
+                            f"removing from state"
+                        )
+                        self.state_manager.untag_season(library_config.name, series_id, season_number)
             
             # ✅ CHECK IF THE SERIES ITSELF SHOULD BE DELETED
             # For series with 0 episodes in Plex, check if the series is eligible for deletion
