@@ -207,16 +207,20 @@ class Televisarr:
             library_name: Name of the Plex library
             all_series: List of series data from Sonarr
         """
-        # Build a map of series_id -> set of season numbers that exist in Sonarr
+        # Build maps of series_id -> season numbers, and series_id -> season -> episode count
         sonarr_seasons_by_series = {}
+        sonarr_episode_counts = {}
         for series in all_series:
             series_id = series["id"]
             seasons = set()
+            counts = {}
             for season in series.get("seasons", []):
                 season_num = season.get("seasonNumber")
                 if season_num is not None:
                     seasons.add(season_num)
+                    counts[season_num] = season.get("statistics", {}).get("episodeCount", 0)
             sonarr_seasons_by_series[series_id] = seasons
+            sonarr_episode_counts[series_id] = counts
 
         # Get all tagged seasons for this library
         tagged_seasons = self.state_manager.get_all_tagged_seasons(library_name)
@@ -265,9 +269,41 @@ class Televisarr:
             except (ValueError, TypeError):
                 continue
 
-            # If the series no longer exists in Sonarr at all, skip - handled by
-            # cleanup_stale_entries already
+            # If the series no longer exists in Sonarr at all, its tagged
+            # seasons are ghosts. Untag them here rather than relying on
+            # cleanup_stale_entries, which removes state but never touches Plex.
             if series_id not in sonarr_seasons_by_series:
+                for season_num_str in list(seasons.keys()):
+                    try:
+                        season_num = int(season_num_str)
+                    except (ValueError, TypeError):
+                        continue
+                    logger.info(
+                        f"Season {season_num} of series {series_id} no longer exists in Sonarr - "
+                        f"removing from state (stale entry)"
+                    )
+                    self.state_manager.untag_season(library_name, series_id, season_num)
+
+                    if plex_library and lib_config:
+                        try:
+                            series_lookup = self.sonarr.get_series_by_id(series_id)
+                            if not series_lookup:
+                                continue
+                            show = self.plex.find_show(
+                                plex_library,
+                                series_lookup.get("title", ""),
+                                series_lookup.get("year"),
+                                series_lookup.get("tvdbId"),
+                            )
+                            if not show:
+                                continue
+                            self._remove_from_leaving_soon_collection(
+                                lib_config, plex_library, show, season_num
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to remove stale season {season_num} from Plex: {e}"
+                            )
                 continue
 
             sonarr_seasons = sonarr_seasons_by_series[series_id]
@@ -278,9 +314,27 @@ class Televisarr:
                 except (ValueError, TypeError):
                     continue
 
-                if season_num not in sonarr_seasons:
+                # SAFETY NET: only prune when Sonarr reports 0 episodes AND
+                # the season is unmonitored (i.e. genuinely abandoned). This
+                # avoids pruning a season that Sonarr transiently reports as
+                # empty while it is actively managed.
+                season_stat = next(
+                    (s for s in series.get("seasons", []) if s.get("seasonNumber") == season_num),
+                    None,
+                )
+                season_is_empty = (
+                    season_stat is not None
+                    and season_stat.get("statistics", {}).get("episodeCount", 0) == 0
+                    and season_stat.get("monitored", True) is False
+                )
+                
+                if season_num not in sonarr_seasons or season_is_empty:
+                    if season_num not in sonarr_seasons:
+                        reason = "no longer exists in Sonarr"
+                    else:
+                        reason = "has 0 episodes in Sonarr"
                     logger.info(
-                        f"Season {season_num} of series {series_id} no longer exists in Sonarr - "
+                        f"Season {season_num} of series {series_id} {reason} - "
                         f"removing from state (stale entry)"
                     )
                     self.state_manager.untag_season(library_name, series_id, season_num)
