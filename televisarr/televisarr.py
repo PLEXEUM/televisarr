@@ -232,8 +232,10 @@ class Televisarr:
                 series_id = int(series_id_str)
             except (ValueError, TypeError):
                 continue
+            # Series missing from Sonarr counts as stale
             if series_id not in sonarr_seasons_by_series:
-                continue
+                has_stale = True
+                break
             sonarr_seasons = sonarr_seasons_by_series[series_id]
             for season_num_str in seasons.keys():
                 try:
