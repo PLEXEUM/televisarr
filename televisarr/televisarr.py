@@ -153,7 +153,10 @@ class Televisarr:
 
             # Clean up state entries for seasons that no longer exist in Sonarr
             self._cleanup_stale_season_state(library_name, all_series)
-            
+
+            # Clear any state entry past its grace period that wasn't deleted this run
+            self._sweep_expired_state_entries(library_config, plex_library)
+
             # Clean up orphaned labels
             self._cleanup_orphaned_labels(library_config, plex_library)
             
@@ -316,6 +319,54 @@ class Televisarr:
                             logger.debug(
                                 f"Failed to remove stale season {season_num} from Plex: {e}"
                             )
+
+    def _sweep_expired_state_entries(
+        self,
+        library_config: LibraryConfig,
+        plex_library: Any
+    ) -> None:
+        """
+        Remove any state entry past its grace period that wasn't deleted this run.
+
+        If an entry is still tagged after the deletion pass and its grace period
+        has elapsed, it's stale (ghost) — clear it. If it was legitimately
+        deletable it would already have been deleted; if not, it will be
+        re-tagged fresh on the next run.
+        """
+        library_name = library_config.name
+        now = datetime.now()
+
+        # Seasons
+        for series_id_str, seasons in self.state_manager.get_all_tagged_seasons(library_name).items():
+            try:
+                series_id = int(series_id_str)
+            except (ValueError, TypeError):
+                continue
+            for season_num_str, data in list(seasons.items()):
+                try:
+                    season_num = int(season_num_str)
+                    tagged_at = datetime.fromisoformat(data["tagged_at"])
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if (now - tagged_at).days >= library_config.grace_period:
+                    logger.info(
+                        f"Season {season_num} of series {series_id} past grace period "
+                        f"and not deleted - removing stale state entry"
+                    )
+                    self.state_manager.untag_season(library_name, series_id, season_num)
+
+        # Series
+        for series_id, data in list(self.state_manager.get_all_tagged_series(library_name).items()):
+            try:
+                tagged_at = datetime.fromisoformat(data["tagged_at"])
+            except (ValueError, TypeError, KeyError):
+                continue
+            if (now - tagged_at).days >= library_config.series.grace_period:
+                logger.info(
+                    f"Series {series_id} past grace period and not deleted - "
+                    f"removing stale state entry"
+                )
+                self.state_manager.untag_series(library_name, series_id)
 
     def _process_series(
         self,
