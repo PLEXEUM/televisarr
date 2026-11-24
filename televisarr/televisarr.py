@@ -395,77 +395,77 @@ class Televisarr:
         show = self.plex.find_show(plex_library, series_title, series_year, series.get("tvdbId"))
         if not show:
             # Series not found in Plex - check if it should be cleaned up (0 episodes)
-            logger.debug(f"Series '{series_title}' not found in Plex, checking for 0-episode cleanup")
-            
-            # Get all seasons for this series
             seasons = series.get("seasons", [])
             season_numbers = [s["seasonNumber"] for s in seasons if s.get("seasonNumber") is not None]
-            
-            if not season_numbers:
-                logger.debug(f"No seasons found for series '{series_title}'")
-                return
-            
-            # Process each season with 0 episodes
-            for season_number in season_numbers:
-                season_watch_status = {
-                    "total_episodes": 0,
-                    "watched_episodes": 0,
-                    "all_watched": False,
-                    "last_watched": None,
-                    "no_activity": True,
-                }
 
-                # Get season added date from Sonarr (use series added date as fallback)
+            if not season_numbers:
+                logger.debug(f"Series '{series_title}' not found in Plex and has no seasons - skipping")
+                return
+
+            is_series_ended = series_status in ["ended", "cancelled"]
+
+            if not is_series_ended:
+                # Continuing series: the 0-episode path can never delete. Log once
+                # instead of once per season, then bail out of the season loop.
+                logger.debug(
+                    f"Series '{series_title}' not found in Plex; {len(season_numbers)} "
+                    f"season(s) skipped (series continuing - user may be saving for later)"
+                )
+            else:
+                # Ended/cancelled series not in Plex: per-season 0-episode cleanup
+                # can still apply, so evaluate each season.
                 season_added_date = None
                 try:
-                    # Try to get series added date
                     if series.get("added"):
-                        from datetime import datetime
-                        # Sonarr returns ISO format with Z suffix
                         added_str = series["added"]
                         if added_str.endswith("Z"):
                             added_str = added_str[:-1] + "+00:00"
                         season_added_date = datetime.fromisoformat(added_str)
-                        # Convert to timezone-naive for comparison
                         if season_added_date.tzinfo:
                             season_added_date = season_added_date.replace(tzinfo=None)
-                        logger.debug(f"Using series added date for 0-episode cleanup: {season_added_date}")
                 except Exception as e:
                     logger.debug(f"Could not get series added date from Sonarr: {e}")
-                
-                is_eligible = self._check_season_deletion_eligibility(
-                    library_config,
-                    season_watch_status,
-                    season_number,
-                    series_id,
-                    season_added_date
-                )
 
-                if is_eligible:
-                    self._handle_season_deletion(library_config, series, season_number, None, plex_library)
-                else:
-                    # Season is in state but no longer eligible - untag it
-                    if self.state_manager.is_item_in_leaving_soon(library_config.name, series_id, season_number):
-                        logger.info(
-                            f"Season {season_number} of '{series_title}' is no longer eligible for deletion - "
-                            f"removing from state"
-                        )
-                        self.state_manager.untag_season(library_config.name, series_id, season_number)
-            
-            # ✅ CHECK IF THE SERIES ITSELF SHOULD BE DELETED
-            # For series with 0 episodes in Plex, check if the series is eligible for deletion
+                for season_number in season_numbers:
+                    season_watch_status = {
+                        "total_episodes": 0,
+                        "watched_episodes": 0,
+                        "all_watched": False,
+                        "last_watched": None,
+                        "no_activity": True,
+                    }
+
+                    is_eligible = self._check_season_deletion_eligibility(
+                        library_config,
+                        season_watch_status,
+                        season_number,
+                        series_id,
+                        season_added_date,
+                    )
+
+                    if is_eligible:
+                        self._handle_season_deletion(library_config, series, season_number, None, plex_library)
+                    else:
+                        if self.state_manager.is_item_in_leaving_soon(library_config.name, series_id, season_number):
+                            logger.info(
+                                f"Season {season_number} of '{series_title}' is no longer eligible for deletion - "
+                                f"removing from state"
+                            )
+                            self.state_manager.untag_season(library_config.name, series_id, season_number)
+
+            # Series-level eligibility check still applies in both cases
             series_eligible_for_deletion = self._check_series_deletion_eligibility(
                 library_config,
                 series,
                 season_numbers,
                 watch_history,
                 None,  # show is None
-                plex_library
+                plex_library,
             )
-            
+
             if series_eligible_for_deletion:
                 self._handle_series_deletion(library_config, series, None, plex_library)
-            
+
             return
 
         # Get all seasons for this series
@@ -486,6 +486,9 @@ class Televisarr:
             plex_library
         )
 
+        # Enumerate episodes once for the whole series and split by season.
+        episodes_by_season = self.plex.get_episodes_by_season_for_show(show)
+
         # Process each season
         for season_number in season_numbers:
             self._process_season(
@@ -494,6 +497,7 @@ class Televisarr:
                 season_number,
                 watch_history,
                 show,
+                episodes_by_season,
                 plex_library,
             )
 
@@ -513,22 +517,21 @@ class Televisarr:
         season_number: int,
         watch_history: Dict[str, Dict],
         show: Any,
-        plex_library: Any
+        episodes_by_season: Dict[int, List[Any]],
+        plex_library: Any,
     ) -> None:
         """
-        Process a single season.
+        Process a single season using a pre-resolved show and pre-split episodes.
         """
         series_id = series["id"]
         series_title = series.get("title", "Unknown")
 
-        # Get season watch status from Plex
-        season_watch_status = self.plex.get_show_season_watch_status(
-            library=plex_library,
-            show_title=series_title,
+        # Get season watch status from the pre-split episode map (no Plex lookup)
+        season_watch_status = self.plex.get_season_status_from_show(
+            show=show,
             season_number=season_number,
-            year=series.get("year"),
-            tvdb_id=series.get("tvdbId"),
-            watch_history=watch_history
+            episodes_by_season=episodes_by_season,
+            watch_history=watch_history,
         )
 
         total_episodes = season_watch_status["total_episodes"]
@@ -536,20 +539,20 @@ class Televisarr:
             logger.debug(f"Season {season_number} has no episodes, skipping")
             return
 
-        # Get the season's added date from Plex (earliest episode added date)
+        # Derive the season's added date from the same shared episode list
         season_added_date = None
-        try:
-            episodes = show.episodes()
-            season_episodes = [ep for ep in episodes if ep.seasonNumber == season_number]
-            if season_episodes:
-                # Get the earliest added date from the season's episodes
+        season_episodes = episodes_by_season.get(season_number, [])
+        if season_episodes:
+            try:
                 earliest_added = min(ep.addedAt for ep in season_episodes)
                 if earliest_added:
-                    # Convert to timezone-naive for comparison
                     season_added_date = earliest_added.replace(tzinfo=None)
-                    logger.debug(f"Season {season_number} added date from Plex: {season_added_date.strftime('%Y-%m-%d %H:%M:%S')}")
-        except Exception as e:
-            logger.debug(f"Could not get season added date from Plex: {e}")
+                    logger.debug(
+                        f"Season {season_number} added date from Plex: "
+                        f"{season_added_date.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not get season added date from Plex: {e}")
 
         # Check if season is eligible for deletion
         is_eligible = self._check_season_deletion_eligibility(
@@ -557,7 +560,7 @@ class Televisarr:
             season_watch_status,
             season_number,
             series_id,
-            season_added_date
+            season_added_date,
         )
 
         if is_eligible:
@@ -569,7 +572,6 @@ class Televisarr:
                 self.state_manager.untag_season(library_config.name, series_id, season_number)
                 logger.debug(f"Removed season {season_number} of '{series_title}' from state (no longer eligible)")
 
-    
     def _check_season_deletion_eligibility(
         self,
         library_config: LibraryConfig,
@@ -708,6 +710,18 @@ class Televisarr:
                     if days_since >= days:
                         logger.debug(f"Season {season_number} partially watched, last watch: {last_watched.strftime('%Y-%m-%d %H:%M:%S')} ({days_since} days ago), eligible")
                         return True
+
+        # Nothing matched - log why, so partially-watched seasons aren't invisible
+        if 0 < watched_episodes < total_episodes:
+            logger.debug(
+                f"Season {season_number} partially watched ({watched_episodes}/{total_episodes}); "
+                f"partially_watched disabled - not eligible"
+            )
+        elif watched_episodes == 0 and not no_activity_config.get("enabled", False):
+            logger.debug(
+                f"Season {season_number} has no watch activity ({total_episodes} episodes); "
+                f"no_activity disabled - not eligible"
+            )
 
         return False
 

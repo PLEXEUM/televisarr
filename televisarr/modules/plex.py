@@ -610,7 +610,98 @@ class PlexMediaServer:
             "no_activity": watched_count == 0,
         }
 
+    def get_season_status_from_show(
+        self,
+        show: Any,
+        season_number: int,
+        episodes_by_season: Dict[int, List[Any]],
+        watch_history: Optional[Dict[str, Dict]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get watch status for a season using a pre-resolved Plex show and a
+        pre-split episodes map, avoiding repeated title lookups and episode
+        enumeration.
 
+        This is the efficient counterpart to get_show_season_watch_status():
+        the caller (Televisarr._process_series) resolves `show` once and splits
+        `show.episodes()` once per series, then reuses both for every season.
+
+        Args:
+            show: Plex show item (already resolved - no lookup performed here)
+            season_number: Season number to check
+            episodes_by_season: Dict mapping season number -> list of episodes
+                                (from the caller's single show.episodes() call)
+            watch_history: Optional watch-history dict keyed by episode ratingKey
+
+        Returns:
+            Same dict shape as get_show_season_watch_status():
+                - total_episodes
+                - watched_episodes
+                - all_watched
+                - last_watched
+                - no_activity
+        """
+        season_episodes = episodes_by_season.get(season_number, [])
+
+        if not season_episodes:
+            return {
+                "total_episodes": 0,
+                "watched_episodes": 0,
+                "all_watched": False,
+                "last_watched": None,
+                "no_activity": True,
+            }
+
+        watched_count = 0
+        last_watched = None
+
+        if watch_history:
+            for episode in season_episodes:
+                rating_key = str(episode.ratingKey)
+                if rating_key in watch_history:
+                    watched_count += 1
+                    hist_date = watch_history[rating_key]["last_watched"]
+                    if last_watched is None or hist_date > last_watched:
+                        last_watched = hist_date
+        else:
+            for episode in season_episodes:
+                is_watched = episode.viewCount is not None and episode.viewCount > 0
+                if is_watched:
+                    watched_count += 1
+                    if episode.viewedAt:
+                        if last_watched is None or episode.viewedAt > last_watched:
+                            last_watched = episode.viewedAt
+
+        return {
+            "total_episodes": len(season_episodes),
+            "watched_episodes": watched_count,
+            "all_watched": watched_count == len(season_episodes) and len(season_episodes) > 0,
+            "last_watched": last_watched,
+            "no_activity": watched_count == 0,
+        }
+
+    def get_episodes_by_season_for_show(self, show: Any) -> Dict[int, List[Any]]:
+        """
+        Enumerate a show's episodes once and group them by season number.
+
+        Use this in place of calling show.episodes() repeatedly per season.
+        Returns an empty dict if the show has no episodes or enumeration fails.
+        """
+        try:
+            episodes = show.episodes()
+        except Exception as e:
+            logger.debug(f"Error enumerating episodes for '{getattr(show, 'title', 'Unknown')}': {e}")
+            return {}
+
+        by_season: Dict[int, List[Any]] = {}
+        for ep in episodes:
+            season_num = getattr(ep, "seasonNumber", None)
+            if season_num is None:
+                continue
+            by_season.setdefault(season_num, []).append(ep)
+        return by_season
+
+    
     def has_episode_been_watched(self, episode: Any) -> bool:
         """
         Check if a specific episode has been watched.
